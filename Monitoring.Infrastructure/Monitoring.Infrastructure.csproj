@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Data\" />
+    <Folder Include="Data\Repositories\" />
     <Folder Include="Repositories\" />
   </ItemGroup>
 

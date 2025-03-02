@@ -5,12 +5,22 @@ using Monitoring.Infrastructure.Data.ScaffoldModels;
 
 namespace Monitoring.Infrastructure.Data;
 
+/// <summary>
+/// Класс DbContext, сгенерированный через Scaffold-DBContext (Database First).
+/// Хранит DbSet'ы, сопоставленные с таблицами.
+/// 
+/// ВАЖНО: строку подключения больше НЕ задаём внутри OnConfiguring,
+/// а используем DI (через DbContextOptions, которые прокидывает AddDbContext).
+/// </summary>
 public partial class MyDbContext : DbContext
 {
+    // Конструктор без параметров Scaffold создаёт "старый" контекст
+    // Но в реальной работе, если вы используете DI, обычно не вызываете его.
     public MyDbContext()
     {
     }
 
+    // Основной конструктор, который будет вызван DI-контейнером
     public MyDbContext(DbContextOptions<MyDbContext> options)
         : base(options)
     {
@@ -54,9 +64,19 @@ public partial class MyDbContext : DbContext
 
     public virtual DbSet<WorksTep> WorksTeps { get; set; }
 
+    /// <summary>
+    /// Убираем вызов UseSqlServer(...), так как у нас DI.
+    /// Если нужно, можем проверить IsConfigured и т.д.
+    /// </summary>
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
-        => optionsBuilder.UseSqlServer("Server=komp322;Database=DocumentControl;Trusted_Connection=True;TrustServerCertificate=True");
+    {
+        // Если надо, можно проверить:
+        // if (!optionsBuilder.IsConfigured)
+        // {
+        //     // Здесь можно при желании задать fallback-логику
+        //     // Но обычно оставляют пустым
+        // }
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
