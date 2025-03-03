@@ -19,7 +19,21 @@ builder.Services.AddScoped<IWorkItemAppService, WorkItemAppService>();
 // Добавляем контроллеры
 builder.Services.AddControllers();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(name: "MyPolicy",
+        builder =>
+        {
+            builder
+                .AllowAnyOrigin()
+                .AllowAnyMethod()
+                .AllowAnyHeader();
+        });
+});
+
 var app = builder.Build();
+
+app.UseCors("MyPolicy");
 
 app.MapControllers();
 
