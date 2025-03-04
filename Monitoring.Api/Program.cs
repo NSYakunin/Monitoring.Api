@@ -42,10 +42,8 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// 4) Полезно добавить Swagger, чтобы тестировать
 builder.Services.AddEndpointsApiExplorer();
 
-// 1) Регистрируем DbContext
 builder.Services.AddDbContext<MyDbContext>(options =>
 {
     // Читаем строку подключения из appsettings.json
@@ -53,9 +51,7 @@ builder.Services.AddDbContext<MyDbContext>(options =>
     options.UseSqlServer(connectionString);
 });
 
-// 2) Регистрируем наш сервис
 builder.Services.AddScoped<IWorkItemAppService, WorkItemAppService>();
-
 builder.Services.AddScoped<ILoginService, LoginService>();
 
 // Добавляем контроллеры
@@ -74,10 +70,8 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
-// Подключаем посредники (middleware)
 app.UseRouting();
 
-// 6) Подключаем аутентификацию и авторизацию (важно — порядок):
 app.UseAuthentication();
 app.UseAuthorization();
 

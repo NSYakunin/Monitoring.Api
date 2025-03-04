@@ -7,6 +7,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Data\Repositories\**" />
+    <Compile Remove="Repositories\**" />
+    <EmbeddedResource Remove="Data\Repositories\**" />
+    <EmbeddedResource Remove="Repositories\**" />
+    <None Remove="Data\Repositories\**" />
+    <None Remove="Repositories\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.2">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -22,11 +31,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Monitoring.Application\Monitoring.Application.csproj" />
     <ProjectReference Include="..\Monitoring.Domain\Monitoring.Domain.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Data\Repositories\" />
-    <Folder Include="Repositories\" />
   </ItemGroup>
 
 </Project>
