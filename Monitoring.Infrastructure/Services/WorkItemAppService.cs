@@ -1,15 +1,11 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
-using Monitoring.Domain.Entities;
-using Monitoring.Infrastructure.Data;  // пространство имён вашего DbContext
+using Monitoring.Infrastructure.Data; // Ваш DbContext, нужно добавить
 using System.Linq;
 
 namespace Monitoring.Infrastructure.Services
 {
-    /// <summary>
-    /// Реализация IWorkItemAppService через EF Core.
-    /// </summary>
     public class WorkItemAppService : IWorkItemAppService
     {
         private readonly MyDbContext _context;
@@ -19,17 +15,11 @@ namespace Monitoring.Infrastructure.Services
             _context = context;
         }
 
-        /// <summary>
-        /// Возвращаем список работ (агрегируем исполнителей и т.д.)
-        /// </summary>
         public async Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(int divisionId)
         {
-            // 1) Делаем JOIN-ы:
-            //    WorkUser -> Works -> Documents -> TypeDocs -> (Controller/Approver через WorkUserControl/WorkUserCheck)
-            //    + привязка к Users (IdUser -> smallName) при условии, что User.idDivision = divisionId
-            //    Здесь упрощённо считаем, что "EXECUTOR" – это тот же User, который появляется в WorkUser.
-
-            // Пример LINQ-запроса (с несколькими LEFT JOIN через GroupJoin/DefaultIfEmpty).
+            // Допустим, у нас есть сущности Works, Documents, TypeDocs, WorkUsers, Users и т.д.
+            // Здесь мы выбираем все работы, где исполнитель (User) относится к нужному divisionId.
+            // Пример LINQ-запроса (упрощённый).
             var rawQuery =
                 from w in _context.Works
                 join doc in _context.Documents on w.IdDocuments equals doc.Id
@@ -69,7 +59,6 @@ namespace Monitoring.Infrastructure.Services
                       // условие: WorkUser.dateFact IS NULL (если нужно)
                       && wu.DateFact == null
 
-                // Выбираем "сырые" поля, без агрегирования исполнителей.
                 select new
                 {
                     WorkId = w.Id,
@@ -86,13 +75,9 @@ namespace Monitoring.Infrastructure.Services
                     FactDate = w.DateFact
                 };
 
-            // 2) Подгружаем всё в память (ToListAsync), после чего сгруппируем по набору полей,
-            //    чтобы собрать всех исполнителей в одну строку (через string.Join).
             var rawList = await rawQuery.ToListAsync();
 
-            // 3) Группируем:
-            //    Ключевыми полями считаем: (WorkId, DocNumber, DocumentName, WorkName, Controller, Approver, PlanDate, K1,K2,K3, FactDate).
-            //    А исполнителей склеиваем во "множественное" поле Executor.
+            // Группируем, чтобы собрать исполнителей в одну строку:
             var grouped = rawList
                 .GroupBy(item => new
                 {
@@ -125,10 +110,81 @@ namespace Monitoring.Infrastructure.Services
                     Korrect3 = g.Key.Korrect3,
                     FactDate = g.Key.FactDate
                 })
-                .OrderBy(x => x.DocumentNumber) // например, сортируем как-то
+                .OrderBy(x => x.DocumentNumber)
                 .ToList();
 
             return grouped;
+        }
+
+        /// <summary>
+        /// Метод, который учитывает фильтры (startDate, endDate, executor, approver, search).
+        /// </summary>
+        public async Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(
+            int divisionId,
+            DateOnly? startDate,
+            DateOnly? endDate,
+            string? executor,
+            string? approver,
+            string? search
+        )
+        {
+            // Берём базовый список (чтобы не дублировать код, можно вызвать предыдущий метод)
+            var allForDivision = await GetWorkItemsByDivisionAsync(divisionId);
+
+            // Теперь в памяти фильтруем по дополнительным условиям:
+            // 1) По исполнителю
+            if (!string.IsNullOrEmpty(executor))
+            {
+                allForDivision = allForDivision
+                    .Where(x => x.Executor != null && x.Executor.Contains(executor, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            // 2) По принимающему
+            if (!string.IsNullOrEmpty(approver))
+            {
+                allForDivision = allForDivision
+                    .Where(x => x.Approver != null && x.Approver.Contains(approver, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            // 3) Поиск (DocumentName, WorkName, Executor, Controller)
+            if (!string.IsNullOrEmpty(search))
+            {
+                allForDivision = allForDivision
+                    .Where(x =>
+                        (x.DocumentName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || (x.WorkName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || (x.Executor ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || (x.Controller ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || (x.Approver ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                    )
+                    .ToList();
+            }
+
+            // 4) Фильтр по датам (пример: <= endDate)
+            // В Razor-проекте вы делали что-то вроде: (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= EndDate
+            // Здесь – аналогично.
+            if (endDate.HasValue)
+            {
+                allForDivision = allForDivision
+                    .Where(x =>
+                        (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= endDate.Value
+                    )
+                    .ToList();
+            }
+
+            // При желании – фильтр ">= startDate"
+            if (startDate.HasValue)
+            {
+                allForDivision = allForDivision
+                    .Where(x =>
+                        (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) >= startDate.Value
+                    )
+                    .ToList();
+            }
+
+            return allForDivision;
         }
     }
 }

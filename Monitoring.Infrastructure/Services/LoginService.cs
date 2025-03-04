@@ -1,8 +1,6 @@
 ﻿using Monitoring.Application.Interfaces;
 using Microsoft.Extensions.Configuration;
-using System.Collections.Generic;
 using System.Data.SqlClient;
-using System.Threading.Tasks;
 
 namespace Monitoring.Infrastructure.Services
 {
@@ -21,10 +19,11 @@ namespace Monitoring.Infrastructure.Services
             var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
-                string sql = @"SELECT [smallName] 
-                               FROM [DocumentControl].[dbo].[Users]
-                               WHERE [Isvalid] = 1 
-                               ORDER BY [smallName]";
+                string sql = @"
+                    SELECT [smallName] 
+                    FROM [DocumentControl].[dbo].[Users]
+                    WHERE [Isvalid] = 1
+                    ORDER BY [smallName]";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
                     await conn.OpenAsync();
@@ -70,7 +69,10 @@ namespace Monitoring.Infrastructure.Services
             return result;
         }
 
-        public async Task<(int? divisionId, bool isValid)> CheckUserCredentialsAsync(string selectedUser, string password)
+        public async Task<(int? divisionId, bool isValid)> CheckUserCredentialsAsync(
+            string selectedUser,
+            string password
+        )
         {
             if (string.IsNullOrEmpty(selectedUser) || string.IsNullOrEmpty(password))
                 return (null, false);
@@ -106,7 +108,5 @@ namespace Monitoring.Infrastructure.Services
             }
             return (divisionId, isPasswordValid);
         }
-
-        // при необходимости - другие методы, например GetUserIdByNameAsync, ...
     }
 }

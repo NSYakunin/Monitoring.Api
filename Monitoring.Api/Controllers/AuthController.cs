@@ -1,12 +1,12 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Microsoft.Extensions.Options;
+using Monitoring.Application.DTO;
 
 namespace Monitoring.Api.Controllers
 {
@@ -26,6 +26,25 @@ namespace Monitoring.Api.Controllers
             _jwtSettings = jwtOptions.Value;
         }
 
+        // DTO-запрос:
+        public class LoginRequest
+        {
+            public string SelectedUser { get; set; } = "";
+            public string Password { get; set; } = "";
+        }
+
+        // DTO-ответ:
+        public class LoginResponse
+        {
+            public string Token { get; set; } = "";
+            public string UserName { get; set; } = "";
+            public int? DivisionId { get; set; }
+        }
+
+        /// <summary>
+        /// Фильтрация пользователей (поиск).
+        /// GET /api/Auth/FilterUsers?query=...
+        /// </summary>
         [HttpGet("FilterUsers")]
         [AllowAnonymous]
         public async Task<ActionResult<List<string>>> FilterUsers([FromQuery] string query)
@@ -41,6 +60,9 @@ namespace Monitoring.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// POST /api/Auth/Login (возвращаем JWT).
+        /// </summary>
         [HttpPost("Login")]
         [AllowAnonymous]
         public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
@@ -50,7 +72,9 @@ namespace Monitoring.Api.Controllers
             if (string.IsNullOrEmpty(request.Password))
                 return BadRequest("Не задан пароль");
 
-            var (divisionId, isValid) = await _loginService.CheckUserCredentialsAsync(request.SelectedUser, request.Password);
+            var (divisionId, isValid) =
+                await _loginService.CheckUserCredentialsAsync(request.SelectedUser, request.Password);
+
             if (!isValid || !divisionId.HasValue)
             {
                 return Unauthorized("Неверное имя пользователя или пароль");
@@ -67,14 +91,15 @@ namespace Monitoring.Api.Controllers
             });
         }
 
+        /// <summary>
+        /// Пример защищённого эндпоинта – для проверки токена.
+        /// </summary>
         [HttpGet("TestAuth")]
         [Authorize]
         public ActionResult<string> TestAuth()
         {
-            // Посмотреть имя пользователя
             var userName = User.Identity?.Name;
             var divId = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
-
             return Ok($"Вы авторизованы как {userName}, divisionId={divId}");
         }
 
