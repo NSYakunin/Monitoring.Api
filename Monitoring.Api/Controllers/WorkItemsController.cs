@@ -2,25 +2,31 @@
 using Microsoft.AspNetCore.Mvc;
 using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
+using System.Security.Claims;
 
 namespace Monitoring.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // Требуем наличие JWT (Bearer-token) для всех методов (кроме особых случаев)
+    [Authorize] // Требуем наличие JWT (Bearer-token) для всех методов (кроме AllowAnonymous)
     public class WorkItemsController : ControllerBase
     {
         private readonly IWorkItemAppService _workItemAppService;
+        private readonly IUserSettingsService _userSettingsService; // для примера "GetAllowedDivisions"
 
-        public WorkItemsController(IWorkItemAppService workItemAppService)
+        public WorkItemsController(
+            IWorkItemAppService workItemAppService,
+            IUserSettingsService userSettingsService
+        )
         {
             _workItemAppService = workItemAppService;
+            _userSettingsService = userSettingsService;
         }
 
         /// <summary>
         /// GET /api/WorkItems
-        /// Параметры запроса (query): ?startDate=2025-01-01&endDate=2025-02-01&executor=...&approver=...&search=... 
-        /// divisionId берём из Claims, чтобы пользователь не ходил в чужой отдел.
+        /// Параметры: ?startDate=2025-01-01&endDate=2025-02-01&executor=...&approver=...&search=...
+        /// divisionId берем из Claims (JWT).
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<WorkItemDto>>> GetFilteredWorkItems(
@@ -41,16 +47,17 @@ namespace Monitoring.Api.Controllers
                 }
                 int divisionId = int.Parse(userDivClaim);
 
-                // Если вы хотите логики по умолчанию:
-                // startDate = 2014-01-01, endDate = последний день текущего месяца.
+                // Логика дат по умолчанию (2014-01-01 ... конец текущего месяца)
                 if (!startDate.HasValue)
                     startDate = new DateOnly(2014, 1, 1);
 
                 if (!endDate.HasValue)
                 {
                     var now = DateTime.Now;
-                    // возьмём последний день месяца
-                    endDate = new DateOnly(now.Year, now.Month, 1).AddMonths(1).AddDays(-1);
+                    // последний день текущего месяца
+                    endDate = new DateOnly(now.Year, now.Month, 1)
+                        .AddMonths(1)
+                        .AddDays(-1);
                 }
 
                 var items = await _workItemAppService.GetFilteredWorkItemsAsync(
@@ -72,48 +79,76 @@ namespace Monitoring.Api.Controllers
 
         /// <summary>
         /// GET /api/WorkItems/AllowedDivisions
-        /// (Демонстрационный метод, который вернёт список отделов, доступных пользователю,
-        /// если вам нужно повторить логику "AllowedDivisions" из Razor. 
-        /// Пока stub, возвращаем только "свой" divisionId. 
+        /// Возвращает "AllowedDivisions" для текущего пользователя, исходя из userId в токене
         /// </summary>
         [HttpGet("AllowedDivisions")]
-        public ActionResult<List<int>> GetAllowedDivisions()
+        public async Task<ActionResult<List<int>>> GetAllowedDivisions()
         {
-            // Для демонстрации отдадим 1 значение:
-            // divisionId, который записан в JWT токене текущего пользователя.
-            var userDivClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
-            if (string.IsNullOrEmpty(userDivClaim))
+            try
             {
-                return Forbid("Нет divisionId в токене");
-            }
-            int divisionId = int.Parse(userDivClaim);
+                // Достаём userId из Claims
+                var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdClaim))
+                {
+                    return Forbid("У вас нет userId в токене (ClaimTypes.NameIdentifier).");
+                }
+                int userId = int.Parse(userIdClaim);
 
-            // В реальности здесь можно вызвать метод из UserSettingsService и вернуть реальный список.
-            return new List<int> { divisionId, 555, 777, 123123, 3123 };
+                var divisions = await _userSettingsService.GetUserAllowedDivisionsAsync(userId);
+
+                // При желании можем добавить в этот список и "свой" divisionId, если его там нет
+                var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
+                if (!string.IsNullOrEmpty(divIdClaim))
+                {
+                    int currentDivision = int.Parse(divIdClaim);
+                    if (!divisions.Contains(currentDivision))
+                    {
+                        divisions.Add(currentDivision);
+                    }
+                }
+
+                return Ok(divisions);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Ошибка сервера: " + ex.Message);
+            }
         }
 
         /// <summary>
         /// GET /api/WorkItems/Executors?divisionId=...
-        /// Для загрузки списка исполнителей.
+        /// Для загрузки списка исполнителей из БД.
         /// </summary>
         [HttpGet("Executors")]
-        public ActionResult<List<string>> GetExecutors([FromQuery] int divisionId)
+        public async Task<ActionResult<List<string>>> GetExecutors([FromQuery] int divisionId)
         {
-            // В реальном проекте – запрос в БД. Пока заглушка:
-            var list = new List<string> { "Иванов И.И.", "Петров П.П.", "Сидоров С.С.", "Тракторенко И.И" };
-            return list;
+            try
+            {
+                var list = await _workItemAppService.GetExecutorsByDivisionId(divisionId);
+                return Ok(list);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Ошибка сервера: " + ex.Message);
+            }
         }
 
         /// <summary>
         /// GET /api/WorkItems/Approvers?divisionId=...
-        /// Для загрузки списка принимающих.
+        /// Для загрузки списка принимающих (пока аналогично исполнителям).
         /// </summary>
         [HttpGet("Approvers")]
-        public ActionResult<List<string>> GetApprovers([FromQuery] int divisionId)
+        public async Task<ActionResult<List<string>>> GetApprovers([FromQuery] int divisionId)
         {
-            // Аналогично, пока заглушка.
-            var list = new List<string> { "Главный Инженер", "Начальник цеха", "Начальник начальников" };
-            return list;
+            try
+            {
+                var list = await _workItemAppService.GetApproversByDivisionId(divisionId);
+                return Ok(list);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Ошибка сервера: " + ex.Message);
+            }
         }
     }
 }

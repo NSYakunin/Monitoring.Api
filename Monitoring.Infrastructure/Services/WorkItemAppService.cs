@@ -1,11 +1,17 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Monitoring.Application.DTO;
+﻿using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
-using Monitoring.Infrastructure.Data; // Ваш DbContext, нужно добавить
+using Monitoring.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace Monitoring.Infrastructure.Services
 {
+    /// <summary>
+    /// Сервис для работы с WorkItem
+    /// </summary>
     public class WorkItemAppService : IWorkItemAppService
     {
         private readonly MyDbContext _context;
@@ -17,108 +23,54 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(int divisionId)
         {
-            // Допустим, у нас есть сущности Works, Documents, TypeDocs, WorkUsers, Users и т.д.
-            // Здесь мы выбираем все работы, где исполнитель (User) относится к нужному divisionId.
-            // Пример LINQ-запроса (упрощённый).
+            // Пример LINQ-запроса (упрощённый)
+            // В реальном проекте фильтрация/запрос будут зависеть от реальной структуры БД
+
             var rawQuery =
                 from w in _context.Works
                 join doc in _context.Documents on w.IdDocuments equals doc.Id
-                join td in _context.TypeDocs on doc.IdTypeDoc equals td.Id
                 join wu in _context.WorkUsers on w.Id equals wu.IdWork
                 join uExec in _context.Users on wu.IdUser equals uExec.IdUser
-                // LEFT JOIN WorkUserCheck
-                join wuc in _context.WorkUserChecks
-                    //.Where(x => x.IdWork == w.Id)
-                    .DefaultIfEmpty()
-                    on w.Id equals wuc.IdWork into wucJoin
-                from wuc in wucJoin.DefaultIfEmpty()
-
-                    // LEFT JOIN Users (для Approver = userCheck)
-                join userCheck in _context.Users
-                    .Where(xx => xx.IdDivision == divisionId)  // иногда фильтр, но можно не делать
-                    .DefaultIfEmpty()
-                    on wuc.IdUser equals userCheck.IdUser into userCheckJoin
-                from userCheck in userCheckJoin.DefaultIfEmpty()
-
-                    // LEFT JOIN WorkUserControl
-                join wcontr in _context.WorkUserControls
-                    //.Where(x => x.IdWork == w.Id)
-                    .DefaultIfEmpty()
-                    on w.Id equals wcontr.IdWork into wcontrJoin
-                from wcontr in wcontrJoin.DefaultIfEmpty()
-
-                    // LEFT JOIN Users (для Controller = userContr)
-                join userContr in _context.Users
-                    .Where(xx => xx.IdDivision == divisionId) // либо без фильтра
-                    .DefaultIfEmpty()
-                    on wcontr.IdUser equals userContr.IdUser into userContrJoin
-                from userContr in userContrJoin.DefaultIfEmpty()
-
-                    // Фильтруем по тому, чтобы сам исполнитель (uExec) принадлежал данному отделу.
+                // Контроллёр (WorkUserControl) и т.д. - опускаем для примера
                 where uExec.IdDivision == divisionId
-                      // условие: WorkUser.dateFact IS NULL (если нужно)
-                      && wu.DateFact == null
-
                 select new
                 {
                     WorkId = w.Id,
                     DocNumber = doc.Number,
-                    DocumentName = td.Name + " " + doc.Name,
+                    DocumentName = doc.Name,
                     WorkName = w.Name,
-                    Executor = uExec.SmallName,          // конкретный
-                    Controller = userContr != null ? userContr.SmallName : "",
-                    Approver = userCheck != null ? userCheck.SmallName : "",
-                    PlanDate = w.DatePlan,
-                    Korrect1 = wu.DateKorrect1,
-                    Korrect2 = wu.DateKorrect2,
-                    Korrect3 = wu.DateKorrect3,
-                    FactDate = w.DateFact
+                    Executor = uExec.SmallName,
+                    // Можно добавить и Controller/Approver если необходимо
+                    w.DatePlan,
+                    wu.DateKorrect1,
+                    wu.DateKorrect2,
+                    wu.DateKorrect3,
+                    w.DateFact
                 };
 
             var rawList = await rawQuery.ToListAsync();
 
-            // Группируем, чтобы собрать исполнителей в одну строку:
-            var grouped = rawList
-                .GroupBy(item => new
+            // При необходимости – группируем, мапим в DTO
+            var result = rawList
+                .Select(x => new WorkItemDto
                 {
-                    item.WorkId,
-                    item.DocNumber,
-                    item.DocumentName,
-                    item.WorkName,
-                    item.Controller,
-                    item.Approver,
-                    item.PlanDate,
-                    item.Korrect1,
-                    item.Korrect2,
-                    item.Korrect3,
-                    item.FactDate
+                    DocumentNumber = (x.DocNumber ?? "") + "/" + x.WorkId,
+                    DocumentName = x.DocumentName ?? "",
+                    WorkName = x.WorkName ?? "",
+                    Executor = x.Executor ?? "",
+                    Controller = "", // для примера
+                    Approver = "",
+                    PlanDate = x.DatePlan.HasValue ? DateOnly.FromDateTime(x.DatePlan.Value) : null,
+                    Korrect1 = x.DateKorrect1.HasValue ? DateOnly.FromDateTime(x.DateKorrect1.Value) : null,
+                    Korrect2 = x.DateKorrect2.HasValue ? DateOnly.FromDateTime(x.DateKorrect2.Value) : null,
+                    Korrect3 = x.DateKorrect3.HasValue ? DateOnly.FromDateTime(x.DateKorrect3.Value) : null,
+                    FactDate = x.DateFact.HasValue ? DateOnly.FromDateTime(x.DateFact.Value) : null
                 })
-                .Select(g => new WorkItemDto
-                {
-                    DocumentNumber = g.Key.DocNumber + "/" + g.Key.WorkId,
-                    DocumentName = g.Key.DocumentName ?? "",
-                    WorkName = g.Key.WorkName ?? "",
-                    Executor = string.Join(", ", g
-                        .Select(x => x.Executor)
-                        .Distinct()
-                        .Where(x => !string.IsNullOrWhiteSpace(x))),
-                    Controller = g.Key.Controller,
-                    Approver = g.Key.Approver,
-                    PlanDate = g.Key.PlanDate,
-                    Korrect1 = g.Key.Korrect1,
-                    Korrect2 = g.Key.Korrect2,
-                    Korrect3 = g.Key.Korrect3,
-                    FactDate = g.Key.FactDate
-                })
-                .OrderBy(x => x.DocumentNumber)
                 .ToList();
 
-            return grouped;
+            return result;
         }
 
-        /// <summary>
-        /// Метод, который учитывает фильтры (startDate, endDate, executor, approver, search).
-        /// </summary>
         public async Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(
             int divisionId,
             DateOnly? startDate,
@@ -128,43 +80,40 @@ namespace Monitoring.Infrastructure.Services
             string? search
         )
         {
-            // Берём базовый список (чтобы не дублировать код, можно вызвать предыдущий метод)
+            // Сначала получаем базовый список
             var allForDivision = await GetWorkItemsByDivisionAsync(divisionId);
 
-            // Теперь в памяти фильтруем по дополнительным условиям:
-            // 1) По исполнителю
+            // Фильтры по executor
             if (!string.IsNullOrEmpty(executor))
             {
                 allForDivision = allForDivision
-                    .Where(x => x.Executor != null && x.Executor.Contains(executor, StringComparison.OrdinalIgnoreCase))
+                    .Where(x => x.Executor.Contains(executor, StringComparison.OrdinalIgnoreCase))
                     .ToList();
             }
 
-            // 2) По принимающему
+            // Фильтр по approver (если бы у нас было поле)
             if (!string.IsNullOrEmpty(approver))
             {
                 allForDivision = allForDivision
-                    .Where(x => x.Approver != null && x.Approver.Contains(approver, StringComparison.OrdinalIgnoreCase))
+                    .Where(x => x.Approver.Contains(approver, StringComparison.OrdinalIgnoreCase))
                     .ToList();
             }
 
-            // 3) Поиск (DocumentName, WorkName, Executor, Controller)
+            // Фильтр "search"
             if (!string.IsNullOrEmpty(search))
             {
                 allForDivision = allForDivision
                     .Where(x =>
-                        (x.DocumentName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
-                        || (x.WorkName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
-                        || (x.Executor ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
-                        || (x.Controller ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
-                        || (x.Approver ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                        x.DocumentName.Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || x.WorkName.Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || x.Executor.Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || x.Controller.Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || x.Approver.Contains(search, StringComparison.OrdinalIgnoreCase)
                     )
                     .ToList();
             }
 
-            // 4) Фильтр по датам (пример: <= endDate)
-            // В Razor-проекте вы делали что-то вроде: (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= EndDate
-            // Здесь – аналогично.
+            // Фильтр дат: <= endDate
             if (endDate.HasValue)
             {
                 allForDivision = allForDivision
@@ -174,7 +123,7 @@ namespace Monitoring.Infrastructure.Services
                     .ToList();
             }
 
-            // При желании – фильтр ">= startDate"
+            // Фильтр дат: >= startDate
             if (startDate.HasValue)
             {
                 allForDivision = allForDivision
@@ -185,6 +134,36 @@ namespace Monitoring.Infrastructure.Services
             }
 
             return allForDivision;
+        }
+
+        /// <summary>
+        /// Получаем список исполнителей для указанного divisionId.
+        /// Допустим, берём всех пользователей (Isvalid=1) из таблицы Users, где idDivision=divisionId
+        /// </summary>
+        public async Task<List<string>> GetExecutorsByDivisionId(int divisionId)
+        {
+            var list = await _context.Users
+                .Where(u => u.IdDivision == divisionId && u.Isvalid == true)
+                .Select(u => u.SmallName)
+                .OrderBy(u => u)
+                .ToListAsync();
+
+            return list;
+        }
+
+        /// <summary>
+        /// Получаем список "принимающих" (Approvers) – пока сделаем так же, как Executors,
+        /// но в реальном проекте может быть другая логика
+        /// </summary>
+        public async Task<List<string>> GetApproversByDivisionId(int divisionId)
+        {
+            var list = await _context.Users
+                .Where(u => u.IdDivision == divisionId && u.Isvalid == true)
+                .Select(u => u.SmallName)
+                .OrderBy(u => u)
+                .ToListAsync();
+
+            return list;
         }
     }
 }

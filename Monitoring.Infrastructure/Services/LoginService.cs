@@ -1,9 +1,14 @@
 ﻿using Monitoring.Application.Interfaces;
 using Microsoft.Extensions.Configuration;
 using System.Data.SqlClient;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Monitoring.Infrastructure.Services
 {
+    /// <summary>
+    /// Сервис для логина/аутентификации (работа с таблицей Users)
+    /// </summary>
     public class LoginService : ILoginService
     {
         private readonly IConfiguration _configuration;
@@ -17,13 +22,15 @@ namespace Monitoring.Infrastructure.Services
         {
             var result = new List<string>();
             var connStr = _configuration.GetConnectionString("DefaultConnection");
+
             using (var conn = new SqlConnection(connStr))
             {
                 string sql = @"
-                    SELECT [smallName] 
+                    SELECT [smallName]
                     FROM [DocumentControl].[dbo].[Users]
                     WHERE [Isvalid] = 1
-                    ORDER BY [smallName]";
+                    ORDER BY [smallName];
+                ";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
                     await conn.OpenAsync();
@@ -48,11 +55,12 @@ namespace Monitoring.Infrastructure.Services
             using (var conn = new SqlConnection(connStr))
             {
                 string sql = @"
-                    SELECT [smallName] 
+                    SELECT [smallName]
                     FROM [DocumentControl].[dbo].[Users]
                     WHERE [Isvalid] = 1
                       AND [smallName] LIKE '%' + @q + '%'
-                    ORDER BY [smallName]";
+                    ORDER BY [smallName];
+                ";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@q", query);
@@ -80,11 +88,10 @@ namespace Monitoring.Infrastructure.Services
             int? divisionId = null;
             bool isPasswordValid = false;
             var connStr = _configuration.GetConnectionString("DefaultConnection");
-
             using (var conn = new SqlConnection(connStr))
             {
                 string sql = @"
-                    SELECT [Password], [idDivision]
+                    SELECT [idUser], [Password], [idDivision]
                     FROM [DocumentControl].[dbo].[Users]
                     WHERE [smallName] = @user
                       AND [Isvalid] = 1";
@@ -97,7 +104,6 @@ namespace Monitoring.Infrastructure.Services
                         if (await reader.ReadAsync())
                         {
                             var passFromDb = reader["Password"]?.ToString();
-                            divisionId = reader["idDivision"] as int?;
                             if (passFromDb == password)
                             {
                                 isPasswordValid = true;

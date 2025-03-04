@@ -8,6 +8,9 @@ using System.Threading.Tasks;
 
 namespace Monitoring.Infrastructure.Services
 {
+    /// <summary>
+    /// Сервис для настроек пользователя, его "AllowedDivisions", паролей, и т.д.
+    /// </summary>
     public class UserSettingsService : IUserSettingsService
     {
         private readonly IConfiguration _configuration;
@@ -52,7 +55,7 @@ namespace Monitoring.Infrastructure.Services
                            [CanSendCloseRequest],
                            [CanAccessSettings]
                     FROM [UserPrivacy]
-                    WHERE [idUser] = @u
+                    WHERE [idUser] = @u;
                 ";
                 using (var cmd = new SqlCommand(query, conn))
                 {
@@ -69,13 +72,9 @@ namespace Monitoring.Infrastructure.Services
                     }
                 }
             }
-
             return result;
         }
 
-        /// <summary>
-        /// Новый метод: Проверяем, активен ли пользователь (Isvalid=1).
-        /// </summary>
         public async Task<bool> IsUserValidAsync(int userId)
         {
             bool isUserActive = false;
@@ -98,8 +97,6 @@ namespace Monitoring.Infrastructure.Services
             return isUserActive;
         }
 
-        // ВАЖНО! Обратите внимание, что мы добавляем параметр "bool isActive"
-        // и перед сохранением в [UserPrivacy] обновляем ещё и поле [Isvalid] в [Users].
         public async Task SavePrivacySettingsAsync(int userId, PrivacySettingsDto dto, bool isActive)
         {
             string connStr = _configuration.GetConnectionString("DefaultConnection");
@@ -110,12 +107,11 @@ namespace Monitoring.Infrastructure.Services
                 {
                     try
                     {
-                        // 1) Обновляем таблицу [Users], поле [Isvalid]
-                        //    (1 = активен, 0 = неактивен)
+                        // 1) Обновляем Users (Isvalid)
                         string updateUserIsValid = @"
                             UPDATE [Users]
                             SET [Isvalid] = @isv
-                            WHERE [idUser] = @u
+                            WHERE [idUser] = @u;
                         ";
                         using (var cmdVal = new SqlCommand(updateUserIsValid, conn, transaction))
                         {
@@ -138,7 +134,7 @@ namespace Monitoring.Infrastructure.Services
                                     INSERT INTO [UserPrivacy]
                                         ([idUser], [CanCloseWork], [CanSendCloseRequest], [CanAccessSettings])
                                     VALUES
-                                        (@u, @close, @send, @acc)
+                                        (@u, @close, @send, @acc);
                                 ";
                                 using (var cmdInsert = new SqlCommand(insertQuery, conn, transaction))
                                 {
@@ -157,7 +153,7 @@ namespace Monitoring.Infrastructure.Services
                                     SET [CanCloseWork] = @close,
                                         [CanSendCloseRequest] = @send,
                                         [CanAccessSettings] = @acc
-                                    WHERE [idUser] = @u
+                                    WHERE [idUser] = @u;
                                 ";
                                 using (var cmdUpdate = new SqlCommand(updateQuery, conn, transaction))
                                 {
@@ -169,8 +165,6 @@ namespace Monitoring.Infrastructure.Services
                                 }
                             }
                         }
-
-                        // Если всё ОК — фиксируем транзакцию
                         transaction.Commit();
                     }
                     catch
@@ -186,6 +180,7 @@ namespace Monitoring.Infrastructure.Services
         {
             var list = new List<DivisionDto>();
             string connStr = _configuration.GetConnectionString("DefaultConnection");
+
             using (var conn = new SqlConnection(connStr))
             {
                 string sql = @"
@@ -196,7 +191,7 @@ namespace Monitoring.Infrastructure.Services
                            [position],
                            [idUserHead]
                     FROM [Divisions]
-                    ORDER BY [idDivision]
+                    ORDER BY [idDivision];
                 ";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
@@ -208,11 +203,11 @@ namespace Monitoring.Infrastructure.Services
                             var d = new DivisionDto
                             {
                                 IdDivision = reader.GetInt32(0),
-                                IdParentDivision = !reader.IsDBNull(1) ? reader.GetInt32(1) : (int?)null,
+                                IdParentDivision = reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1),
                                 NameDivision = reader.GetString(2),
                                 SmallNameDivision = reader.IsDBNull(3) ? "" : reader.GetString(3),
-                                Position = !reader.IsDBNull(4) ? reader.GetInt32(4) : (int?)null,
-                                IdUserHead = !reader.IsDBNull(5) ? reader.GetInt32(5) : (int?)null
+                                Position = reader.IsDBNull(4) ? (int?)null : reader.GetInt32(4),
+                                IdUserHead = reader.IsDBNull(5) ? (int?)null : reader.GetInt32(5)
                             };
                             list.Add(d);
                         }
@@ -231,7 +226,7 @@ namespace Monitoring.Infrastructure.Services
                 string sql = @"
                     SELECT [idDivision]
                     FROM [UserAllowedDivisions]
-                    WHERE [idUser] = @u
+                    WHERE [idUser] = @u;
                 ";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
@@ -259,10 +254,10 @@ namespace Monitoring.Infrastructure.Services
                 {
                     try
                     {
-                        // 1) Удаляем все старые записи
+                        // 1) Удаляем старые записи
                         string deleteSql = @"
                             DELETE FROM [UserAllowedDivisions]
-                            WHERE [idUser] = @u
+                            WHERE [idUser] = @u;
                         ";
                         using (var cmdDel = new SqlCommand(deleteSql, conn, transaction))
                         {
@@ -273,7 +268,7 @@ namespace Monitoring.Infrastructure.Services
                         // 2) Вставляем новые
                         string insertSql = @"
                             INSERT INTO [UserAllowedDivisions]([idUser],[idDivision])
-                            VALUES(@u, @d)
+                            VALUES(@u, @d);
                         ";
                         foreach (var divId in divisionIds)
                         {
@@ -284,7 +279,6 @@ namespace Monitoring.Infrastructure.Services
                                 await cmdIns.ExecuteNonQueryAsync();
                             }
                         }
-
                         transaction.Commit();
                     }
                     catch
@@ -305,7 +299,7 @@ namespace Monitoring.Infrastructure.Services
                 string sql = @"
                     UPDATE [Users]
                     SET [Password] = @pwd
-                    WHERE [idUser] = @u
+                    WHERE [idUser] = @u;
                 ";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
@@ -326,7 +320,7 @@ namespace Monitoring.Infrastructure.Services
                 string sql = @"
                     SELECT [Password]
                     FROM [Users]
-                    WHERE [idUser] = @u
+                    WHERE [idUser] = @u;
                 ";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
@@ -368,7 +362,7 @@ namespace Monitoring.Infrastructure.Services
                                 ([Name], [smallName], [idDivision], [Password], [idTypeUser], [Isvalid])
                             OUTPUT INSERTED.[idUser]
                             VALUES
-                                (@name, @smallName, @idDiv, @pwd, 2, 1)
+                                (@name, @smallName, @idDiv, @pwd, 2, 1);
                         ";
                         using (var cmd = new SqlCommand(insertUserSql, conn, transaction))
                         {
@@ -386,7 +380,7 @@ namespace Monitoring.Infrastructure.Services
                             INSERT INTO [UserPrivacy]
                                 ([idUser], [CanCloseWork], [CanSendCloseRequest], [CanAccessSettings])
                             VALUES
-                                (@u, @cClose, @cSend, @cAccess)
+                                (@u, @cClose, @cSend, @cAccess);
                         ";
                         using (var cmdP = new SqlCommand(insertPrivacySql, conn, transaction))
                         {

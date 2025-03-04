@@ -1,19 +1,20 @@
+using Monitoring.Api;
+using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
 using Monitoring.Infrastructure.Data;
 using Monitoring.Infrastructure.Services;
-using Microsoft.EntityFrameworkCore;
-using Monitoring.Api;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Options;
 using System.Text;
-using Monitoring.Application.DTO;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Добавляем настройки JWT из appsettings.json
+// 1) Регистрируем настройки JWT (читаем из appsettings.json)
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
-// JWT Auth
+// 2) Извлекаем ключи и другие поля (для удобства)
 var jwtSection = builder.Configuration.GetSection("JwtSettings");
 var secretKey = jwtSection.GetValue<string>("SecretKey");
 var issuer = jwtSection.GetValue<string>("Issuer");
@@ -27,6 +28,7 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
+    // Для упрощения отключим Https-метаданные и включим валидацию токена
     options.RequireHttpsMetadata = false;
     options.SaveToken = true;
     options.TokenValidationParameters = new TokenValidationParameters
@@ -42,41 +44,37 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddEndpointsApiExplorer();
-
+// 4) Подключение к БД
 builder.Services.AddDbContext<MyDbContext>(options =>
 {
-    // Читаем строку подключения из appsettings.json
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
     options.UseSqlServer(connectionString);
 });
 
+// 5) Регистрируем наши сервисы
 builder.Services.AddScoped<IWorkItemAppService, WorkItemAppService>();
 builder.Services.AddScoped<ILoginService, LoginService>();
+builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
 
-// Добавляем контроллеры
+// 6) Добавляем контроллеры + Swagger (если нужно)
 builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
 
+// 7) CORS-политика, если требуется
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy(name: "MyPolicy",
-        builder =>
-        {
-            builder
-                .AllowAnyOrigin()
-                .AllowAnyMethod()
-                .AllowAnyHeader();
-        });
+    options.AddPolicy("MyPolicy", policyBuilder =>
+    {
+        policyBuilder.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+    });
 });
 
 var app = builder.Build();
-app.UseRouting();
 
+app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.UseCors("MyPolicy");
 
 app.MapControllers();
-
 app.Run();

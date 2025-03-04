@@ -2,16 +2,18 @@
 
 namespace Monitoring.Application.Interfaces
 {
+    /// <summary>
+    /// Сервис для работы с WorkItem
+    /// </summary>
     public interface IWorkItemAppService
     {
         /// <summary>
-        /// Получить работы для конкретного отдела (в базовом виде без фильтра).
+        /// Получить список работ (упрощённый пример)
         /// </summary>
         Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(int divisionId);
 
         /// <summary>
-        /// Более продвинутый метод, который учитывает фильтры:
-        /// startDate, endDate, executor, approver, search.
+        /// Получить список работ по фильтрам
         /// </summary>
         Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(
             int divisionId,
@@ -22,6 +24,15 @@ namespace Monitoring.Application.Interfaces
             string? search
         );
 
-        // При необходимости – другие методы
+        /// <summary>
+        /// Возвращает список исполнителей (smallName) для конкретного divisionId
+        /// </summary>
+        Task<List<string>> GetExecutorsByDivisionId(int divisionId);
+
+        /// <summary>
+        /// Возвращает список "принимающих" (approvers) для конкретного divisionId
+        /// (может быть логика по роли, пока сделаем простой вариант)
+        /// </summary>
+        Task<List<string>> GetApproversByDivisionId(int divisionId);
     }
 }

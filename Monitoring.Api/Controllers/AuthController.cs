@@ -2,11 +2,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Monitoring.Application.Interfaces;
+using Monitoring.Application.DTO;
+using Microsoft.Extensions.Options;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Microsoft.Extensions.Options;
-using Monitoring.Application.DTO;
 
 namespace Monitoring.Api.Controllers
 {
@@ -24,21 +24,6 @@ namespace Monitoring.Api.Controllers
         {
             _loginService = loginService;
             _jwtSettings = jwtOptions.Value;
-        }
-
-        // DTO-запрос:
-        public class LoginRequest
-        {
-            public string SelectedUser { get; set; } = "";
-            public string Password { get; set; } = "";
-        }
-
-        // DTO-ответ:
-        public class LoginResponse
-        {
-            public string Token { get; set; } = "";
-            public string UserName { get; set; } = "";
-            public int? DivisionId { get; set; }
         }
 
         /// <summary>
@@ -72,16 +57,20 @@ namespace Monitoring.Api.Controllers
             if (string.IsNullOrEmpty(request.Password))
                 return BadRequest("Не задан пароль");
 
-            var (divisionId, isValid) =
+            var (userId, divisionId, isValid) =
                 await _loginService.CheckUserCredentialsAsync(request.SelectedUser, request.Password);
 
-            if (!isValid || !divisionId.HasValue)
+            if (!isValid || !divisionId.HasValue || !userId.HasValue)
             {
                 return Unauthorized("Неверное имя пользователя или пароль");
             }
 
             // Генерируем токен
-            var token = GenerateJwtToken(request.SelectedUser, divisionId.Value);
+            var token = GenerateJwtToken(
+                userId.Value,
+                request.SelectedUser,
+                divisionId.Value
+            );
 
             return Ok(new LoginResponse
             {
@@ -93,6 +82,7 @@ namespace Monitoring.Api.Controllers
 
         /// <summary>
         /// Пример защищённого эндпоинта – для проверки токена.
+        /// GET /api/Auth/TestAuth
         /// </summary>
         [HttpGet("TestAuth")]
         [Authorize]
@@ -100,13 +90,17 @@ namespace Monitoring.Api.Controllers
         {
             var userName = User.Identity?.Name;
             var divId = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
-            return Ok($"Вы авторизованы как {userName}, divisionId={divId}");
+            var userId = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+
+            return Ok($"Вы авторизованы как {userName}, userId={userId}, divisionId={divId}");
         }
 
-        private string GenerateJwtToken(string userName, int divisionId)
+        private string GenerateJwtToken(int userId, string userName, int divisionId)
         {
+            // Добавляем userId, userName, divisionId в claims
             var claims = new List<Claim>
             {
+                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
                 new Claim(ClaimTypes.Name, userName),
                 new Claim("divisionId", divisionId.ToString())
             };
@@ -114,6 +108,7 @@ namespace Monitoring.Api.Controllers
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecretKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+            // Можно учесть _jwtSettings.ExpiresMinutes, тут - 8 часов для примера
             var token = new JwtSecurityToken(
                 issuer: _jwtSettings.Issuer,
                 audience: _jwtSettings.Audience,
