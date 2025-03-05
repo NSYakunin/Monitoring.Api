@@ -16,7 +16,7 @@
         /// Проверяет логин/пароль, возвращая (divisionId, isValid).
         /// Если всё ок, isValid=true и divisionId!=null.
         /// </summary>
-        Task<(int? divisionId, bool isValid)> CheckUserCredentialsAsync(
+        Task<(int? userId, int? divisionId, bool isValid)> CheckUserCredentialsAsync(
             string selectedUser,
             string password
         );

@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Monitoring.Infrastructure.Services
 {
@@ -23,52 +24,103 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(int divisionId)
         {
-            // Пример LINQ-запроса (упрощённый)
-            // В реальном проекте фильтрация/запрос будут зависеть от реальной структуры БД
-
+            // Допустим, у нас есть сущности Works, Documents, TypeDocs, WorkUsers, Users и т.д.
+            // Здесь мы выбираем все работы, где исполнитель (User) относится к нужному divisionId.
+            // Пример LINQ-запроса (упрощённый).
             var rawQuery =
                 from w in _context.Works
                 join doc in _context.Documents on w.IdDocuments equals doc.Id
+                join td in _context.TypeDocs on doc.IdTypeDoc equals td.Id
                 join wu in _context.WorkUsers on w.Id equals wu.IdWork
                 join uExec in _context.Users on wu.IdUser equals uExec.IdUser
-                // Контроллёр (WorkUserControl) и т.д. - опускаем для примера
+                // LEFT JOIN WorkUserCheck
+                join wuc in _context.WorkUserChecks
+                    //.Where(x => x.IdWork == w.Id)
+                    .DefaultIfEmpty()
+                    on w.Id equals wuc.IdWork into wucJoin
+                from wuc in wucJoin.DefaultIfEmpty()
+
+                    // LEFT JOIN Users (для Approver = userCheck)
+                join userCheck in _context.Users
+                    .Where(xx => xx.IdDivision == divisionId)  // иногда фильтр, но можно не делать
+                    .DefaultIfEmpty()
+                    on wuc.IdUser equals userCheck.IdUser into userCheckJoin
+                from userCheck in userCheckJoin.DefaultIfEmpty()
+
+                    // LEFT JOIN WorkUserControl
+                join wcontr in _context.WorkUserControls
+                    //.Where(x => x.IdWork == w.Id)
+                    .DefaultIfEmpty()
+                    on w.Id equals wcontr.IdWork into wcontrJoin
+                from wcontr in wcontrJoin.DefaultIfEmpty()
+
+                    // LEFT JOIN Users (для Controller = userContr)
+                join userContr in _context.Users
+                    .Where(xx => xx.IdDivision == divisionId) // либо без фильтра
+                    .DefaultIfEmpty()
+                    on wcontr.IdUser equals userContr.IdUser into userContrJoin
+                from userContr in userContrJoin.DefaultIfEmpty()
+
+                    // Фильтруем по тому, чтобы сам исполнитель (uExec) принадлежал данному отделу.
                 where uExec.IdDivision == divisionId
+                      // условие: WorkUser.dateFact IS NULL (если нужно)
+                      && wu.DateFact == null
+
                 select new
                 {
                     WorkId = w.Id,
                     DocNumber = doc.Number,
-                    DocumentName = doc.Name,
+                    DocumentName = td.Name + " " + doc.Name,
                     WorkName = w.Name,
-                    Executor = uExec.SmallName,
-                    // Можно добавить и Controller/Approver если необходимо
-                    w.DatePlan,
-                    wu.DateKorrect1,
-                    wu.DateKorrect2,
-                    wu.DateKorrect3,
-                    w.DateFact
+                    Executor = uExec.SmallName,          // конкретный
+                    Controller = userContr != null ? userContr.SmallName : "",
+                    Approver = userCheck != null ? userCheck.SmallName : "",
+                    PlanDate = w.DatePlan,
+                    Korrect1 = wu.DateKorrect1,
+                    Korrect2 = wu.DateKorrect2,
+                    Korrect3 = wu.DateKorrect3,
+                    FactDate = w.DateFact
                 };
 
             var rawList = await rawQuery.ToListAsync();
 
-            // При необходимости – группируем, мапим в DTO
-            var result = rawList
-                .Select(x => new WorkItemDto
+            // Группируем, чтобы собрать исполнителей в одну строку:
+            var grouped = rawList
+                .GroupBy(item => new
                 {
-                    DocumentNumber = (x.DocNumber ?? "") + "/" + x.WorkId,
-                    DocumentName = x.DocumentName ?? "",
-                    WorkName = x.WorkName ?? "",
-                    Executor = x.Executor ?? "",
-                    Controller = "", // для примера
-                    Approver = "",
-                    PlanDate = x.DatePlan.HasValue ? DateOnly.FromDateTime(x.DatePlan.Value) : null,
-                    Korrect1 = x.DateKorrect1.HasValue ? DateOnly.FromDateTime(x.DateKorrect1.Value) : null,
-                    Korrect2 = x.DateKorrect2.HasValue ? DateOnly.FromDateTime(x.DateKorrect2.Value) : null,
-                    Korrect3 = x.DateKorrect3.HasValue ? DateOnly.FromDateTime(x.DateKorrect3.Value) : null,
-                    FactDate = x.DateFact.HasValue ? DateOnly.FromDateTime(x.DateFact.Value) : null
+                    item.WorkId,
+                    item.DocNumber,
+                    item.DocumentName,
+                    item.WorkName,
+                    item.Controller,
+                    item.Approver,
+                    item.PlanDate,
+                    item.Korrect1,
+                    item.Korrect2,
+                    item.Korrect3,
+                    item.FactDate
                 })
+                .Select(g => new WorkItemDto
+                {
+                    DocumentNumber = g.Key.DocNumber + "/" + g.Key.WorkId,
+                    DocumentName = g.Key.DocumentName ?? "",
+                    WorkName = g.Key.WorkName ?? "",
+                    Executor = string.Join(", ", g
+                        .Select(x => x.Executor)
+                        .Distinct()
+                        .Where(x => !string.IsNullOrWhiteSpace(x))),
+                    Controller = g.Key.Controller,
+                    Approver = g.Key.Approver,
+                    PlanDate = g.Key.PlanDate,
+                    Korrect1 = g.Key.Korrect1,
+                    Korrect2 = g.Key.Korrect2,
+                    Korrect3 = g.Key.Korrect3,
+                    FactDate = g.Key.FactDate
+                })
+                .OrderBy(x => x.DocumentNumber)
                 .ToList();
 
-            return result;
+            return grouped;
         }
 
         public async Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(

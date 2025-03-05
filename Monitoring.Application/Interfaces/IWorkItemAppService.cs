@@ -1,4 +1,5 @@
-﻿using Monitoring.Application.DTO;
+﻿using Microsoft.AspNetCore.Mvc;
+using Monitoring.Application.DTO;
 
 namespace Monitoring.Application.Interfaces
 {

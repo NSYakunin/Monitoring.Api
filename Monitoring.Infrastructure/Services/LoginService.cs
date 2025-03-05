@@ -77,16 +77,18 @@ namespace Monitoring.Infrastructure.Services
             return result;
         }
 
-        public async Task<(int? divisionId, bool isValid)> CheckUserCredentialsAsync(
+        public async Task<(int? userId, int? divisionId, bool isValid)> CheckUserCredentialsAsync(
             string selectedUser,
             string password
         )
         {
             if (string.IsNullOrEmpty(selectedUser) || string.IsNullOrEmpty(password))
-                return (null, false);
+                return (null, null, false);
 
             int? divisionId = null;
+            int? userId = null;
             bool isPasswordValid = false;
+
             var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
@@ -104,6 +106,8 @@ namespace Monitoring.Infrastructure.Services
                         if (await reader.ReadAsync())
                         {
                             var passFromDb = reader["Password"]?.ToString();
+                            userId = int.Parse(reader["idUser"].ToString());
+                            divisionId = int.Parse(reader["idDivision"].ToString());
                             if (passFromDb == password)
                             {
                                 isPasswordValid = true;
@@ -112,7 +116,7 @@ namespace Monitoring.Infrastructure.Services
                     }
                 }
             }
-            return (divisionId, isPasswordValid);
+            return (userId, divisionId, isPasswordValid);
         }
     }
 }
