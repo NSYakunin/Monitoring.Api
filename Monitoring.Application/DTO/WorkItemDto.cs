@@ -20,18 +20,19 @@ namespace Monitoring.Application.DTO
         public string Controller { get; set; } = string.Empty;
         public string Approver { get; set; } = string.Empty;
 
-        public DateOnly? PlanDate { get; set; }
-        public DateOnly? Korrect1 { get; set; }
-        public DateOnly? Korrect2 { get; set; }
-        public DateOnly? Korrect3 { get; set; }
-        public DateOnly? FactDate { get; set; }
+
+        public DateTime? PlanDate { get; set; }
+        public DateTime? Korrect1 { get; set; }
+        public DateTime? Korrect2 { get; set; }
+        public DateTime? Korrect3 { get; set; }
+        public DateTime? FactDate { get; set; }
 
         public string HighlightCssClass { get; set; } = "";
 
         // Для хранения Pending-заявки от текущего пользователя
         public int? UserPendingRequestId { get; set; }
         public string? UserPendingRequestType { get; set; }
-        public DateOnly? UserPendingProposedDate { get; set; }
+        public DateTime? UserPendingProposedDate { get; set; }
         public string? UserPendingRequestNote { get; set; }
         public string? UserPendingReceiver { get; set; }
     }

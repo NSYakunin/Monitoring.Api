@@ -34,8 +34,8 @@ namespace Monitoring.Api.Controllers
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<WorkItemDto>>> GetFilteredWorkItems(
-            [FromQuery] DateOnly? startDate,
-            [FromQuery] DateOnly? endDate,
+            [FromQuery] DateTime? startDate,
+            [FromQuery] DateTime? endDate,
             [FromQuery] string? executor,
             [FromQuery] string? approver,
             [FromQuery] string? search
@@ -50,17 +50,18 @@ namespace Monitoring.Api.Controllers
             int divisionId = int.Parse(divIdClaim);
 
             if (!startDate.HasValue)
-                startDate = new DateOnly(2014, 1, 1);
+                startDate = new DateTime(2014, 1, 1);
             if (!endDate.HasValue)
             {
                 var now = DateTime.Now;
-                endDate = new DateOnly(now.Year, now.Month, 1)
+                endDate = new DateTime(now.Year, now.Month, 1)
                     .AddMonths(1)
                     .AddDays(-1);
             }
-
+            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+            int userId = int.Parse(userIdClaim);
             var items = await _workItemAppService.GetFilteredWorkItemsAsync(
-                divisionId, startDate, endDate, executor, approver, search
+                divisionId, startDate, endDate, executor, approver, search, userId
             );
             return Ok(items);
         }

@@ -17,17 +17,17 @@ public partial class Work
 
     public string? Name { get; set; }
 
-    public DateOnly DatePlan { get; set; }
+    public DateTime DatePlan { get; set; }
 
     public int IdDivIsp { get; set; }
 
-    public DateOnly? DateKorrect1 { get; set; }
+    public DateTime? DateKorrect1 { get; set; }
 
-    public DateOnly? DateKorrect2 { get; set; }
+    public DateTime? DateKorrect2 { get; set; }
 
-    public DateOnly? DateKorrect3 { get; set; }
+    public DateTime? DateKorrect3 { get; set; }
 
-    public DateOnly? DateFact { get; set; }
+    public DateTime? DateFact { get; set; }
 
     public string? Notes { get; set; }
 

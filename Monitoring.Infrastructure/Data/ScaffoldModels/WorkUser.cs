@@ -11,13 +11,13 @@ public partial class WorkUser
 
     public int IdWork { get; set; }
 
-    public DateOnly? DateFact { get; set; }
+    public DateTime? DateFact { get; set; }
 
-    public DateOnly? DateKorrect1 { get; set; }
+    public DateTime? DateKorrect1 { get; set; }
 
-    public DateOnly? DateKorrect2 { get; set; }
+    public DateTime? DateKorrect2 { get; set; }
 
-    public DateOnly? DateKorrect3 { get; set; }
+    public DateTime? DateKorrect3 { get; set; }
 
     public bool? IsSendToUser { get; set; }
 }

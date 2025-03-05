@@ -149,16 +149,16 @@ namespace Monitoring.Infrastructure.Services
                                 switch ((req.RequestType ?? "").ToLower())
                                 {
                                     case "факт":
-                                        wu.DateFact = DateOnly.FromDateTime(req.ProposedDate.Value);
+                                        wu.DateFact = req.ProposedDate.Value;
                                         break;
                                     case "корр1":
-                                        wu.DateKorrect1 = DateOnly.FromDateTime(req.ProposedDate.Value);
+                                        wu.DateKorrect1 = req.ProposedDate.Value;
                                         break;
                                     case "корр2":
-                                        wu.DateKorrect2 = DateOnly.FromDateTime(req.ProposedDate.Value);
+                                        wu.DateKorrect2 = req.ProposedDate.Value;
                                         break;
                                     case "корр3":
-                                        wu.DateKorrect3 = DateOnly.FromDateTime(req.ProposedDate.Value);
+                                        wu.DateKorrect3 = req.ProposedDate.Value;
                                         break;
                                 }
                             }

@@ -11,18 +11,19 @@ namespace Monitoring.Application.Interfaces
         /// <summary>
         /// Получить список работ (упрощённый пример)
         /// </summary>
-        Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(int divisionId);
+        Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(List<int> divisionIds);
 
         /// <summary>
         /// Получить список работ по фильтрам
         /// </summary>
         Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(
             int divisionId,
-            DateOnly? startDate,
-            DateOnly? endDate,
+            DateTime? startDate,
+            DateTime? endDate,
             string? executor,
             string? approver,
-            string? search
+            string? search,
+            int userIdClaim
         );
 
         /// <summary>

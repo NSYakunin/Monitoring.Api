@@ -7,6 +7,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Monitoring.Domain.Entities;
+using System.Data.SqlClient;
+using Microsoft.Extensions.Configuration;
 
 namespace Monitoring.Infrastructure.Services
 {
@@ -18,11 +21,18 @@ namespace Monitoring.Infrastructure.Services
     {
         private readonly MyDbContext _context;
         private readonly IMemoryCache _cache;
+        private readonly IUserSettingsService _userSettingsService;
+        private readonly string _connectionString;
 
-        public WorkItemAppService(MyDbContext context, IMemoryCache cache)
+
+        public WorkItemAppService(MyDbContext context, IMemoryCache cache, IUserSettingsService userSettingsService, IConfiguration configuration)
         {
+            _connectionString = configuration.GetConnectionString("DefaultConnection")
+                ?? throw new ArgumentNullException("Connection string not found");
             _context = context;
             _cache = cache;
+            _userSettingsService = userSettingsService;
+
         }
 
         /// <summary>
@@ -30,118 +40,188 @@ namespace Monitoring.Infrastructure.Services
         /// что user.IdDivision = divisionId).
         /// Результат кэшируем.
         /// </summary>
-        public async Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(int divisionId)
+        public async Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(List<int> divisionIds)
         {
-            // Ключ кэша:
-            string cacheKey = $"WorkItems_{divisionId}";
+            // Если список пустой, возвращаем пустой список (или можно выбросить исключение)
+            if (divisionIds == null || divisionIds.Count == 0)
+                return new List<WorkItemDto>();
 
-            if (_cache.TryGetValue(cacheKey, out List<WorkItemDto> cached))
+            // Чтобы кэшировать по комбинации подразделений, упорядочим ID 
+            // и сформируем строку-ключ: "AllWorkItems_10_12_17"
+            var sortedDivs = divisionIds.OrderBy(x => x).ToList();
+            string divisionsKeyPart = string.Join("_", sortedDivs);
+            string cacheKey = $"AllWorkItems_{divisionsKeyPart}";
+
+            // Пытаемся взять из кэша
+            if (!_cache.TryGetValue(cacheKey, out List<WorkItemDto> workItems))
             {
-                return cached;
+                workItems = new List<WorkItemDto>();
+
+                // Динамическое формирование IN (...)
+                var paramNames = new List<string>();
+                for (int i = 0; i < sortedDivs.Count; i++)
+                {
+                    paramNames.Add($"@div{i}");
+                }
+                string inClause = string.Join(", ", paramNames);
+
+                string query = $@"
+                    SELECT 
+                        d.Number,
+                        wu.idWork,
+                        td.Name + ' ' + d.Name AS DocumentName,
+                        w.Name AS WorkName,
+                        -- Имя конкретного пользователя-исполнителя
+                        U2.smallName AS Executor,
+
+                        (SELECT smallName 
+                         FROM Users 
+                         WHERE idUser = wucontr.idUser
+                        ) AS Controller,
+
+                        (SELECT smallName 
+                         FROM Users 
+                         WHERE idUser = wuc.idUser
+                        ) AS Approver,
+
+                        w.DatePlan,
+                        wu.DateKorrect1,
+                        wu.DateKorrect2,
+                        wu.DateKorrect3,
+                        w.DateFact
+
+                    FROM WorkUser wu
+                        INNER JOIN Works w 
+                            ON wu.idWork = w.id
+                        INNER JOIN Documents d 
+                            ON w.idDocuments = d.id
+                        LEFT JOIN WorkUserCheck wuc 
+                            ON wuc.idWork = w.id
+                        LEFT JOIN WorkUserControl wucontr 
+                            ON wucontr.idWork = w.id
+                        INNER JOIN TypeDocs td 
+                            ON td.id = d.idTypeDoc
+                        INNER JOIN Users u 
+                            ON wu.idUser = u.idUser
+
+                        -- Дополнительные JOIN-ы (EXECUTOR):
+                        INNER JOIN WorkUser       wu2   ON wu2.idWork = w.id
+                        INNER JOIN Users          U2    ON U2.idUser = wu2.idUser
+                        INNER JOIN WorkUserCheck  wuc2  ON wuc2.idWork = w.id
+
+                    WHERE
+                        wu.dateFact IS NULL
+                        AND wu.idUser IN (
+                            SELECT idUser 
+                            FROM Users 
+                            WHERE idDivision IN ({inClause})
+                        );
+                ";
+
+                using (var conn = new SqlConnection(_connectionString))
+                using (var cmd = new SqlCommand(query, conn))
+                {
+                    // Добавляем параметры
+                    for (int i = 0; i < sortedDivs.Count; i++)
+                    {
+                        cmd.Parameters.AddWithValue(paramNames[i], sortedDivs[i]);
+                    }
+
+                    await conn.OpenAsync();
+
+                    // Используем словарь для "агрегации" записей:
+                    var dict = new Dictionary<string, WorkItemDto>();
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            // Считываем поля
+                            string idWork = reader["idWork"]?.ToString();
+                            string docNumber = reader["Number"]?.ToString() + "/" + reader["idWork"]?.ToString();
+                            string docName = reader["DocumentName"]?.ToString();
+                            string workName = reader["WorkName"]?.ToString();
+                            string executor = reader["Executor"]?.ToString();
+                            string controller = reader["Controller"]?.ToString();
+                            string approver = reader["Approver"]?.ToString();
+                            DateTime? planDate = reader["DatePlan"] as DateTime?;
+                            DateTime? kor1 = reader["DateKorrect1"] as DateTime?;
+                            DateTime? kor2 = reader["DateKorrect2"] as DateTime?;
+                            DateTime? kor3 = reader["DateKorrect3"] as DateTime?;
+                            DateTime? factDate = reader["DateFact"] as DateTime?;
+
+                            // Формируем ключ для агрегации (без executor/controller),
+                            // чтобы одинаковые записи объединять:
+                            string key = $"{docName}|{workName}|{approver}|{planDate}|{kor1}|{kor2}|{kor3}|{factDate}|{idWork}";
+
+                            if (!dict.ContainsKey(key))
+                            {
+                                dict[key] = new WorkItemDto
+                                {
+                                    DocumentNumber = docNumber,
+                                    DocumentName = docName ?? "",
+                                    WorkName = workName ?? "",
+                                    Executor = executor ?? "",
+                                    Controller = controller ?? "",
+                                    Approver = approver ?? "",
+                                    PlanDate = planDate,
+                                    Korrect1 = kor1,
+                                    Korrect2 = kor2,
+                                    Korrect3 = kor3,
+                                    FactDate = factDate
+                                };
+                            }
+                            else
+                            {
+                                // Если запись уже есть, "добавляем" исполнителей/контроллеров
+                                var existing = dict[key];
+
+                                // Агрегация исполнителей (Executor)
+                                if (!string.IsNullOrWhiteSpace(executor))
+                                {
+                                    var execList = existing.Executor
+                                        .Split(",", StringSplitOptions.RemoveEmptyEntries)
+                                        .Select(x => x.Trim())
+                                        .ToList();
+
+                                    if (!execList.Contains(executor))
+                                    {
+                                        execList.Add(executor);
+                                        existing.Executor = string.Join(", ", execList);
+                                    }
+                                }
+
+                                // Агрегация контролирующих (Controller)
+                                if (!string.IsNullOrWhiteSpace(controller))
+                                {
+                                    var ctrlList = existing.Controller
+                                        .Split(",", StringSplitOptions.RemoveEmptyEntries)
+                                        .Select(x => x.Trim())
+                                        .ToList();
+
+                                    if (!ctrlList.Contains(controller))
+                                    {
+                                        ctrlList.Add(controller);
+                                        existing.Controller = string.Join(", ", ctrlList);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Преобразуем словарь в список
+                    workItems = dict.Values.ToList();
+                }
+
+                // Сохраняем в кэш
+                var cacheOptions = new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
+                };
+                _cache.Set(cacheKey, workItems, cacheOptions);
             }
 
-            // Если нет в кэше — загружаем из БД:
-            var query =
-                from w in _context.Works
-                join doc in _context.Documents on w.IdDocuments equals doc.Id
-                join td in _context.TypeDocs on doc.IdTypeDoc equals td.Id
-                join wu in _context.WorkUsers on w.Id equals wu.IdWork
-                join uExec in _context.Users on wu.IdUser equals uExec.IdUser
-                // LEFT JOIN WorkUserCheck
-                join wuc in _context.WorkUserChecks
-                    //.Where(x => x.IdWork == w.Id)
-                    .DefaultIfEmpty()
-                    on w.Id equals wuc.IdWork into wucJoin
-                from wuc in wucJoin.DefaultIfEmpty()
-
-                    // LEFT JOIN Users (для Approver = userCheck)
-                join userCheck in _context.Users
-                    .Where(xx => xx.IdDivision == divisionId)  // иногда фильтр, но можно не делать
-                    .DefaultIfEmpty()
-                    on wuc.IdUser equals userCheck.IdUser into userCheckJoin
-                from userCheck in userCheckJoin.DefaultIfEmpty()
-
-                // LEFT JOIN WorkUserControl
-                join wcontr in _context.WorkUserControls
-                    //.Where(x => x.IdWork == w.Id)
-                    .DefaultIfEmpty()
-                    on w.Id equals wcontr.IdWork into wcontrJoin
-                from wcontr in wcontrJoin.DefaultIfEmpty()
-
-                    // LEFT JOIN Users (для Controller = userContr)
-                join userContr in _context.Users
-                    .Where(xx => xx.IdDivision == divisionId) // либо без фильтра
-                    .DefaultIfEmpty()
-                    on wcontr.IdUser equals userContr.IdUser into userContrJoin
-                from userContr in userContrJoin.DefaultIfEmpty()
-
-                    // Фильтруем по тому, чтобы сам исполнитель (uExec) принадлежал данному отделу.
-                where uExec.IdDivision == divisionId
-                      // условие: WorkUser.dateFact IS NULL (если нужно)
-                      && wu.DateFact == null
-
-                select new
-                {
-                    WorkId = w.Id,
-                    DocNumber = doc.Number,
-                    DocumentName = td.Name + " " + doc.Name,
-                    WorkName = w.Name,
-                    Executor = uExec.SmallName,          // конкретный
-                    Controller = userContr != null ? userContr.SmallName : "",
-                    Approver = userCheck != null ? userCheck.SmallName : "",
-                    PlanDate = w.DatePlan,
-                    Korrect1 = wu.DateKorrect1,
-                    Korrect2 = wu.DateKorrect2,
-                    Korrect3 = wu.DateKorrect3,
-                    FactDate = w.DateFact
-                };
-
-            var rawList = await query.ToListAsync();
-
-            // Группируем, чтобы собрать исполнителей в одну строку:
-            var grouped = rawList
-                .GroupBy(item => new
-                {
-                    item.WorkId,
-                    item.DocNumber,
-                    item.DocumentName,
-                    item.WorkName,
-                    item.Controller,
-                    item.Approver,
-                    item.PlanDate,
-                    item.Korrect1,
-                    item.Korrect2,
-                    item.Korrect3,
-                    item.FactDate
-                })
-                .Select(g => new WorkItemDto
-                {
-                    DocumentNumber = g.Key.DocNumber + "/" + g.Key.WorkId,
-                    DocumentName = g.Key.DocumentName ?? "",
-                    WorkName = g.Key.WorkName ?? "",
-                    Executor = string.Join(", ", g
-                        .Select(x => x.Executor)
-                        .Distinct()
-                        .Where(x => !string.IsNullOrWhiteSpace(x))),
-                    Controller = g.Key.Controller,
-                    Approver = g.Key.Approver,
-                    PlanDate = g.Key.PlanDate,
-                    Korrect1 = g.Key.Korrect1,
-                    Korrect2 = g.Key.Korrect2,
-                    Korrect3 = g.Key.Korrect3,
-                    FactDate = g.Key.FactDate
-                })
-                .OrderBy(x => x.DocumentNumber)
-                .ToList();
-
-            // Запишем в кэш на 30 минут
-            var cacheOptions = new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
-            };
-            _cache.Set(cacheKey, grouped, cacheOptions);
-
-            return grouped;
+            return workItems;
         }
 
         /// <summary>
@@ -149,14 +229,15 @@ namespace Monitoring.Infrastructure.Services
         /// </summary>
         public async Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(
             int divisionId,
-            DateOnly? startDate,
-            DateOnly? endDate,
+            DateTime? startDate,
+            DateTime? endDate,
             string? executor,
             string? approver,
-            string? search
+            string? search,
+            int userIdClaim
         )
         {
-            var all = await GetWorkItemsByDivisionAsync(divisionId);
+            var all = await GetWorkItemsByDivisionAsync(_userSettingsService.GetUserAllowedDivisionsAsync(userIdClaim).Result);
             var query = all.AsQueryable();
 
             // Фильтр по исполнителю

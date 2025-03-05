@@ -106,7 +106,7 @@ namespace Monitoring.Infrastructure.Services
                             UPDATE [Users] SET [Isvalid] = @isv
                             WHERE [idUser] = @u
                         ";
-                        using (var cmd1 = new SqlCommand(sqlUpdUser, conn, trans))
+                        using (var cmd1 = new SqlCommand(sqlUpdUser, conn, transaction))
                         {
                             cmd1.Parameters.AddWithValue("@isv", isActive ? 1 : 0);
                             cmd1.Parameters.AddWithValue("@u", userId);
@@ -115,7 +115,7 @@ namespace Monitoring.Infrastructure.Services
 
                         // 2) Проверяем запись в UserPrivacy
                         string sqlCheck = @"SELECT COUNT(*) FROM [UserPrivacy] WHERE [idUser] = @u";
-                        using (var cmd2 = new SqlCommand(sqlCheck, conn, trans))
+                        using (var cmd2 = new SqlCommand(sqlCheck, conn, transaction))
                         {
                             cmd2.Parameters.AddWithValue("@u", userId);
                             int count = (int)(await cmd2.ExecuteScalarAsync());
@@ -127,7 +127,7 @@ namespace Monitoring.Infrastructure.Services
                                     ([idUser],[CanCloseWork],[CanSendCloseRequest],[CanAccessSettings])
                                     VALUES (@u,@c1,@c2,@c3)
                                 ";
-                                using (var cmd3 = new SqlCommand(ins, conn, trans))
+                                using (var cmd3 = new SqlCommand(ins, conn, transaction))
                                 {
                                     cmd3.Parameters.AddWithValue("@u", userId);
                                     cmd3.Parameters.AddWithValue("@c1", dto.CanCloseWork);
@@ -146,7 +146,7 @@ namespace Monitoring.Infrastructure.Services
                                         [CanAccessSettings] = @c3
                                     WHERE [idUser] = @u
                                 ";
-                                using (var cmd3 = new SqlCommand(upd, conn, trans))
+                                using (var cmd3 = new SqlCommand(upd, conn, transaction))
                                 {
                                     cmd3.Parameters.AddWithValue("@u", userId);
                                     cmd3.Parameters.AddWithValue("@c1", dto.CanCloseWork);
