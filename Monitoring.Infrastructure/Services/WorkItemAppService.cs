@@ -199,8 +199,6 @@ namespace Monitoring.Infrastructure.Services
                 .Select(u => u.SmallName)
                 .OrderBy(u => u)
                 .ToListAsync();
-
-            return list;
         }
 
         /// <summary>
