@@ -1,16 +1,13 @@
 ﻿using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
 using Microsoft.Extensions.Configuration;
-using System;
-using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Threading.Tasks;
+using System;
+using System.Collections.Generic;
 
 namespace Monitoring.Infrastructure.Services
 {
-    /// <summary>
-    /// Сервис для настроек пользователя, его "AllowedDivisions", паролей, и т.д.
-    /// </summary>
     public class UserSettingsService : IUserSettingsService
     {
         private readonly IConfiguration _configuration;
@@ -23,83 +20,80 @@ namespace Monitoring.Infrastructure.Services
         public async Task<bool> HasAccessToSettingsAsync(int userId)
         {
             var settings = await GetPrivacySettingsAsync(userId);
-            return settings != null && settings.CanAccessSettings;
+            return settings.CanAccessSettings;
         }
 
         public async Task<bool> HasAccessToSendCloseRequestAsync(int userId)
         {
-            var settings = await GetPrivacySettingsAsync(userId);
-            return settings != null && settings.CanSendCloseRequest;
+            var s = await GetPrivacySettingsAsync(userId);
+            return s.CanSendCloseRequest;
         }
 
         public async Task<bool> HasAccessToCloseWorkAsync(int userId)
         {
-            var settings = await GetPrivacySettingsAsync(userId);
-            return settings != null && settings.CanCloseWork;
+            var s = await GetPrivacySettingsAsync(userId);
+            return s.CanCloseWork;
         }
 
         public async Task<PrivacySettingsDto> GetPrivacySettingsAsync(int userId)
         {
-            var result = new PrivacySettingsDto
+            var dto = new PrivacySettingsDto
             {
                 CanCloseWork = false,
                 CanSendCloseRequest = false,
                 CanAccessSettings = false
             };
 
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
-                string query = @"
-                    SELECT [CanCloseWork],
-                           [CanSendCloseRequest],
-                           [CanAccessSettings]
+                string sql = @"
+                    SELECT [CanCloseWork],[CanSendCloseRequest],[CanAccessSettings]
                     FROM [UserPrivacy]
-                    WHERE [idUser] = @u;
+                    WHERE [idUser] = @u
                 ";
-                using (var cmd = new SqlCommand(query, conn))
+                using (var cmd = new SqlCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@u", userId);
                     await conn.OpenAsync();
-                    using (var reader = await cmd.ExecuteReaderAsync())
+                    using (var rdr = await cmd.ExecuteReaderAsync())
                     {
-                        if (await reader.ReadAsync())
+                        if (await rdr.ReadAsync())
                         {
-                            result.CanCloseWork = reader.GetBoolean(0);
-                            result.CanSendCloseRequest = reader.GetBoolean(1);
-                            result.CanAccessSettings = reader.GetBoolean(2);
+                            dto.CanCloseWork = rdr.GetBoolean(0);
+                            dto.CanSendCloseRequest = rdr.GetBoolean(1);
+                            dto.CanAccessSettings = rdr.GetBoolean(2);
                         }
                     }
                 }
             }
-            return result;
+            return dto;
         }
 
         public async Task<bool> IsUserValidAsync(int userId)
         {
-            bool isUserActive = false;
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
+            bool isActive = false;
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
                 await conn.OpenAsync();
-                string sql = "SELECT Isvalid FROM Users WHERE idUser = @id";
+                string sql = @"SELECT Isvalid FROM [Users] WHERE [idUser] = @u";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
-                    cmd.Parameters.AddWithValue("@id", userId);
-                    object obj = await cmd.ExecuteScalarAsync();
+                    cmd.Parameters.AddWithValue("@u", userId);
+                    var obj = await cmd.ExecuteScalarAsync();
                     if (obj != null && obj != DBNull.Value)
                     {
-                        int val = Convert.ToInt32(obj);
-                        isUserActive = (val == 1);
+                        isActive = (Convert.ToInt32(obj) == 1);
                     }
                 }
             }
-            return isUserActive;
+            return isActive;
         }
 
         public async Task SavePrivacySettingsAsync(int userId, PrivacySettingsDto dto, bool isActive)
         {
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
                 await conn.OpenAsync();
@@ -108,60 +102,57 @@ namespace Monitoring.Infrastructure.Services
                     try
                     {
                         // 1) Обновляем Users (Isvalid)
-                        string updateUserIsValid = @"
-                            UPDATE [Users]
-                            SET [Isvalid] = @isv
-                            WHERE [idUser] = @u;
+                        string sqlUpdUser = @"
+                            UPDATE [Users] SET [Isvalid] = @isv
+                            WHERE [idUser] = @u
                         ";
-                        using (var cmdVal = new SqlCommand(updateUserIsValid, conn, transaction))
+                        using (var cmd1 = new SqlCommand(sqlUpdUser, conn, trans))
                         {
-                            cmdVal.Parameters.AddWithValue("@isv", isActive ? 1 : 0);
-                            cmdVal.Parameters.AddWithValue("@u", userId);
-                            await cmdVal.ExecuteNonQueryAsync();
+                            cmd1.Parameters.AddWithValue("@isv", isActive ? 1 : 0);
+                            cmd1.Parameters.AddWithValue("@u", userId);
+                            await cmd1.ExecuteNonQueryAsync();
                         }
 
-                        // 2) Смотрим, есть ли запись в [UserPrivacy]
-                        string selectQuery = @"SELECT COUNT(*) FROM [UserPrivacy] WHERE [idUser] = @u";
-                        using (var cmdSelect = new SqlCommand(selectQuery, conn, transaction))
+                        // 2) Проверяем запись в UserPrivacy
+                        string sqlCheck = @"SELECT COUNT(*) FROM [UserPrivacy] WHERE [idUser] = @u";
+                        using (var cmd2 = new SqlCommand(sqlCheck, conn, trans))
                         {
-                            cmdSelect.Parameters.AddWithValue("@u", userId);
-                            int count = (int)await cmdSelect.ExecuteScalarAsync();
-
+                            cmd2.Parameters.AddWithValue("@u", userId);
+                            int count = (int)(await cmd2.ExecuteScalarAsync());
                             if (count == 0)
                             {
                                 // INSERT
-                                string insertQuery = @"
+                                string ins = @"
                                     INSERT INTO [UserPrivacy]
-                                        ([idUser], [CanCloseWork], [CanSendCloseRequest], [CanAccessSettings])
-                                    VALUES
-                                        (@u, @close, @send, @acc);
+                                    ([idUser],[CanCloseWork],[CanSendCloseRequest],[CanAccessSettings])
+                                    VALUES (@u,@c1,@c2,@c3)
                                 ";
-                                using (var cmdInsert = new SqlCommand(insertQuery, conn, transaction))
+                                using (var cmd3 = new SqlCommand(ins, conn, trans))
                                 {
-                                    cmdInsert.Parameters.AddWithValue("@u", userId);
-                                    cmdInsert.Parameters.AddWithValue("@close", dto.CanCloseWork);
-                                    cmdInsert.Parameters.AddWithValue("@send", dto.CanSendCloseRequest);
-                                    cmdInsert.Parameters.AddWithValue("@acc", dto.CanAccessSettings);
-                                    await cmdInsert.ExecuteNonQueryAsync();
+                                    cmd3.Parameters.AddWithValue("@u", userId);
+                                    cmd3.Parameters.AddWithValue("@c1", dto.CanCloseWork);
+                                    cmd3.Parameters.AddWithValue("@c2", dto.CanSendCloseRequest);
+                                    cmd3.Parameters.AddWithValue("@c3", dto.CanAccessSettings);
+                                    await cmd3.ExecuteNonQueryAsync();
                                 }
                             }
                             else
                             {
                                 // UPDATE
-                                string updateQuery = @"
+                                string upd = @"
                                     UPDATE [UserPrivacy]
-                                    SET [CanCloseWork] = @close,
-                                        [CanSendCloseRequest] = @send,
-                                        [CanAccessSettings] = @acc
-                                    WHERE [idUser] = @u;
+                                    SET [CanCloseWork] = @c1,
+                                        [CanSendCloseRequest] = @c2,
+                                        [CanAccessSettings] = @c3
+                                    WHERE [idUser] = @u
                                 ";
-                                using (var cmdUpdate = new SqlCommand(updateQuery, conn, transaction))
+                                using (var cmd3 = new SqlCommand(upd, conn, trans))
                                 {
-                                    cmdUpdate.Parameters.AddWithValue("@u", userId);
-                                    cmdUpdate.Parameters.AddWithValue("@close", dto.CanCloseWork);
-                                    cmdUpdate.Parameters.AddWithValue("@send", dto.CanSendCloseRequest);
-                                    cmdUpdate.Parameters.AddWithValue("@acc", dto.CanAccessSettings);
-                                    await cmdUpdate.ExecuteNonQueryAsync();
+                                    cmd3.Parameters.AddWithValue("@u", userId);
+                                    cmd3.Parameters.AddWithValue("@c1", dto.CanCloseWork);
+                                    cmd3.Parameters.AddWithValue("@c2", dto.CanSendCloseRequest);
+                                    cmd3.Parameters.AddWithValue("@c3", dto.CanAccessSettings);
+                                    await cmd3.ExecuteNonQueryAsync();
                                 }
                             }
                         }
@@ -179,8 +170,7 @@ namespace Monitoring.Infrastructure.Services
         public async Task<List<DivisionDto>> GetAllDivisionsAsync()
         {
             var list = new List<DivisionDto>();
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
-
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
                 string sql = @"
@@ -220,23 +210,23 @@ namespace Monitoring.Infrastructure.Services
         public async Task<List<int>> GetUserAllowedDivisionsAsync(int userId)
         {
             var list = new List<int>();
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
                 string sql = @"
                     SELECT [idDivision]
                     FROM [UserAllowedDivisions]
-                    WHERE [idUser] = @u;
+                    WHERE [idUser] = @u
                 ";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@u", userId);
                     await conn.OpenAsync();
-                    using (var reader = await cmd.ExecuteReaderAsync())
+                    using (var rdr = await cmd.ExecuteReaderAsync())
                     {
-                        while (await reader.ReadAsync())
+                        while (await rdr.ReadAsync())
                         {
-                            list.Add(reader.GetInt32(0));
+                            list.Add(rdr.GetInt32(0));
                         }
                     }
                 }
@@ -246,44 +236,42 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task SaveUserAllowedDivisionsAsync(int userId, List<int> divisionIds)
         {
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
                 await conn.OpenAsync();
-                using (var transaction = conn.BeginTransaction())
+                using (var trans = conn.BeginTransaction())
                 {
                     try
                     {
-                        // 1) Удаляем старые записи
-                        string deleteSql = @"
-                            DELETE FROM [UserAllowedDivisions]
-                            WHERE [idUser] = @u;
-                        ";
-                        using (var cmdDel = new SqlCommand(deleteSql, conn, transaction))
+                        // 1) Удаляем все старые
+                        string delSql = @"DELETE FROM [UserAllowedDivisions] WHERE [idUser] = @u";
+                        using (var cmdDel = new SqlCommand(delSql, conn, trans))
                         {
                             cmdDel.Parameters.AddWithValue("@u", userId);
                             await cmdDel.ExecuteNonQueryAsync();
                         }
 
                         // 2) Вставляем новые
-                        string insertSql = @"
+                        string insSql = @"
                             INSERT INTO [UserAllowedDivisions]([idUser],[idDivision])
-                            VALUES(@u, @d);
+                            VALUES (@u, @d)
                         ";
                         foreach (var divId in divisionIds)
                         {
-                            using (var cmdIns = new SqlCommand(insertSql, conn, transaction))
+                            using (var cmdIns = new SqlCommand(insSql, conn, trans))
                             {
                                 cmdIns.Parameters.AddWithValue("@u", userId);
                                 cmdIns.Parameters.AddWithValue("@d", divId);
                                 await cmdIns.ExecuteNonQueryAsync();
                             }
                         }
-                        transaction.Commit();
+
+                        trans.Commit();
                     }
                     catch
                     {
-                        transaction.Rollback();
+                        trans.Rollback();
                         throw;
                     }
                 }
@@ -292,14 +280,14 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task ChangeUserPasswordAsync(int userId, string newPassword)
         {
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
                 await conn.OpenAsync();
                 string sql = @"
                     UPDATE [Users]
                     SET [Password] = @pwd
-                    WHERE [idUser] = @u;
+                    WHERE [idUser] = @u
                 ";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
@@ -312,29 +300,25 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task<string?> GetUserCurrentPasswordAsync(int userId)
         {
-            string? password = null;
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
+            string? pwd = null;
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
                 await conn.OpenAsync();
-                string sql = @"
-                    SELECT [Password]
-                    FROM [Users]
-                    WHERE [idUser] = @u;
-                ";
+                string sql = @"SELECT [Password] FROM [Users] WHERE [idUser] = @u";
                 using (var cmd = new SqlCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@u", userId);
-                    using (var reader = await cmd.ExecuteReaderAsync())
+                    using (var rdr = await cmd.ExecuteReaderAsync())
                     {
-                        if (await reader.ReadAsync())
+                        if (await rdr.ReadAsync())
                         {
-                            password = reader.IsDBNull(0) ? null : reader.GetString(0);
+                            pwd = rdr.IsDBNull(0) ? null : rdr.GetString(0);
                         }
                     }
                 }
             }
-            return password;
+            return pwd;
         }
 
         public async Task<int> RegisterUserInDbAsync(
@@ -347,60 +331,57 @@ namespace Monitoring.Infrastructure.Services
             bool canAccessSettings
         )
         {
-            int newUserId = 0;
-            string connStr = _configuration.GetConnectionString("DefaultConnection");
+            int newId = 0;
+            var connStr = _configuration.GetConnectionString("DefaultConnection");
             using (var conn = new SqlConnection(connStr))
             {
                 await conn.OpenAsync();
-                using (var transaction = conn.BeginTransaction())
+                using (var trans = conn.BeginTransaction())
                 {
                     try
                     {
-                        // 1) INSERT в [Users]
-                        string insertUserSql = @"
+                        // 1) Вставляем в Users
+                        string insUser = @"
                             INSERT INTO [Users]
-                                ([Name], [smallName], [idDivision], [Password], [idTypeUser], [Isvalid])
+                            ([Name],[smallName],[idDivision],[Password],[idTypeUser],[Isvalid])
                             OUTPUT INSERTED.[idUser]
-                            VALUES
-                                (@name, @smallName, @idDiv, @pwd, 2, 1);
+                            VALUES (@nm,@sn,@div,@pwd,2,1)
                         ";
-                        using (var cmd = new SqlCommand(insertUserSql, conn, transaction))
+                        using (var cmd1 = new SqlCommand(insUser, conn, trans))
                         {
-                            cmd.Parameters.AddWithValue("@name", fullName);
-                            cmd.Parameters.AddWithValue("@smallName", (object?)smallName ?? DBNull.Value);
-                            cmd.Parameters.AddWithValue("@idDiv", (object?)idDivision ?? DBNull.Value);
-                            cmd.Parameters.AddWithValue("@pwd", password);
-
-                            object newIdObj = await cmd.ExecuteScalarAsync();
-                            newUserId = Convert.ToInt32(newIdObj);
+                            cmd1.Parameters.AddWithValue("@nm", fullName);
+                            cmd1.Parameters.AddWithValue("@sn", (object?)smallName ?? DBNull.Value);
+                            cmd1.Parameters.AddWithValue("@div", (object?)idDivision ?? DBNull.Value);
+                            cmd1.Parameters.AddWithValue("@pwd", password);
+                            var objNew = await cmd1.ExecuteScalarAsync();
+                            newId = Convert.ToInt32(objNew);
                         }
 
-                        // 2) INSERT в [UserPrivacy]
-                        string insertPrivacySql = @"
+                        // 2) Вставляем в UserPrivacy
+                        string insPriv = @"
                             INSERT INTO [UserPrivacy]
-                                ([idUser], [CanCloseWork], [CanSendCloseRequest], [CanAccessSettings])
-                            VALUES
-                                (@u, @cClose, @cSend, @cAccess);
+                            ([idUser],[CanCloseWork],[CanSendCloseRequest],[CanAccessSettings])
+                            VALUES (@u,@c1,@c2,@c3)
                         ";
-                        using (var cmdP = new SqlCommand(insertPrivacySql, conn, transaction))
+                        using (var cmd2 = new SqlCommand(insPriv, conn, trans))
                         {
-                            cmdP.Parameters.AddWithValue("@u", newUserId);
-                            cmdP.Parameters.AddWithValue("@cClose", canCloseWork);
-                            cmdP.Parameters.AddWithValue("@cSend", canSendCloseRequest);
-                            cmdP.Parameters.AddWithValue("@cAccess", canAccessSettings);
-                            await cmdP.ExecuteNonQueryAsync();
+                            cmd2.Parameters.AddWithValue("@u", newId);
+                            cmd2.Parameters.AddWithValue("@c1", canCloseWork);
+                            cmd2.Parameters.AddWithValue("@c2", canSendCloseRequest);
+                            cmd2.Parameters.AddWithValue("@c3", canAccessSettings);
+                            await cmd2.ExecuteNonQueryAsync();
                         }
 
-                        transaction.Commit();
+                        trans.Commit();
                     }
                     catch
                     {
-                        transaction.Rollback();
+                        trans.Rollback();
                         throw;
                     }
                 }
             }
-            return newUserId;
+            return newId;
         }
     }
 }

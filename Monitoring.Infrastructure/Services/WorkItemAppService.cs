@@ -2,32 +2,46 @@
 using Monitoring.Application.Interfaces;
 using Monitoring.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory; // Для кэша
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Monitoring.Infrastructure.Services
 {
     /// <summary>
-    /// Сервис для работы с WorkItem
+    /// Сервис для получения списка работ (WorkItems) по отделам и фильтрам.
+    /// Содержит кэширование, аналогичное старому коду.
     /// </summary>
     public class WorkItemAppService : IWorkItemAppService
     {
         private readonly MyDbContext _context;
+        private readonly IMemoryCache _cache;
 
-        public WorkItemAppService(MyDbContext context)
+        public WorkItemAppService(MyDbContext context, IMemoryCache cache)
         {
             _context = context;
+            _cache = cache;
         }
 
+        /// <summary>
+        /// Получить все работы для конкретного подразделения (с учётом того,
+        /// что user.IdDivision = divisionId).
+        /// Результат кэшируем.
+        /// </summary>
         public async Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(int divisionId)
         {
-            // Допустим, у нас есть сущности Works, Documents, TypeDocs, WorkUsers, Users и т.д.
-            // Здесь мы выбираем все работы, где исполнитель (User) относится к нужному divisionId.
-            // Пример LINQ-запроса (упрощённый).
-            var rawQuery =
+            // Ключ кэша:
+            string cacheKey = $"WorkItems_{divisionId}";
+
+            if (_cache.TryGetValue(cacheKey, out List<WorkItemDto> cached))
+            {
+                return cached;
+            }
+
+            // Если нет в кэше — загружаем из БД:
+            var query =
                 from w in _context.Works
                 join doc in _context.Documents on w.IdDocuments equals doc.Id
                 join td in _context.TypeDocs on doc.IdTypeDoc equals td.Id
@@ -47,7 +61,7 @@ namespace Monitoring.Infrastructure.Services
                     on wuc.IdUser equals userCheck.IdUser into userCheckJoin
                 from userCheck in userCheckJoin.DefaultIfEmpty()
 
-                    // LEFT JOIN WorkUserControl
+                // LEFT JOIN WorkUserControl
                 join wcontr in _context.WorkUserControls
                     //.Where(x => x.IdWork == w.Id)
                     .DefaultIfEmpty()
@@ -82,7 +96,7 @@ namespace Monitoring.Infrastructure.Services
                     FactDate = w.DateFact
                 };
 
-            var rawList = await rawQuery.ToListAsync();
+            var rawList = await query.ToListAsync();
 
             // Группируем, чтобы собрать исполнителей в одну строку:
             var grouped = rawList
@@ -120,9 +134,19 @@ namespace Monitoring.Infrastructure.Services
                 .OrderBy(x => x.DocumentNumber)
                 .ToList();
 
+            // Запишем в кэш на 30 минут
+            var cacheOptions = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
+            };
+            _cache.Set(cacheKey, grouped, cacheOptions);
+
             return grouped;
         }
 
+        /// <summary>
+        /// Фильтруем полученный список по датам / исполнителю / принимающему / поиску.
+        /// </summary>
         public async Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(
             int divisionId,
             DateOnly? startDate,
@@ -132,60 +156,50 @@ namespace Monitoring.Infrastructure.Services
             string? search
         )
         {
-            // Сначала получаем базовый список
-            var allForDivision = await GetWorkItemsByDivisionAsync(divisionId);
+            var all = await GetWorkItemsByDivisionAsync(divisionId);
+            var query = all.AsQueryable();
 
-            // Фильтры по executor
+            // Фильтр по исполнителю
             if (!string.IsNullOrEmpty(executor))
             {
-                allForDivision = allForDivision
-                    .Where(x => x.Executor.Contains(executor, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
+                query = query.Where(x => x.Executor.Contains(executor, StringComparison.OrdinalIgnoreCase));
             }
 
-            // Фильтр по approver (если бы у нас было поле)
+            // Фильтр по принимающему
             if (!string.IsNullOrEmpty(approver))
             {
-                allForDivision = allForDivision
-                    .Where(x => x.Approver.Contains(approver, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
+                query = query.Where(x => (x.Approver ?? "").Contains(approver, StringComparison.OrdinalIgnoreCase));
             }
 
-            // Фильтр "search"
+            // Фильтр search
             if (!string.IsNullOrEmpty(search))
             {
-                allForDivision = allForDivision
-                    .Where(x =>
-                        x.DocumentName.Contains(search, StringComparison.OrdinalIgnoreCase)
-                        || x.WorkName.Contains(search, StringComparison.OrdinalIgnoreCase)
-                        || x.Executor.Contains(search, StringComparison.OrdinalIgnoreCase)
-                        || x.Controller.Contains(search, StringComparison.OrdinalIgnoreCase)
-                        || x.Approver.Contains(search, StringComparison.OrdinalIgnoreCase)
-                    )
-                    .ToList();
+                query = query.Where(x =>
+                    (x.DocumentName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (x.WorkName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (x.Executor ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (x.Controller ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (x.Approver ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                );
             }
 
-            // Фильтр дат: <= endDate
+            // Фильтр по дате <= endDate
             if (endDate.HasValue)
             {
-                allForDivision = allForDivision
-                    .Where(x =>
-                        (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= endDate.Value
-                    )
-                    .ToList();
+                query = query.Where(x =>
+                    (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= endDate.Value
+                );
             }
 
-            // Фильтр дат: >= startDate
+            // Фильтр по дате >= startDate
             if (startDate.HasValue)
             {
-                allForDivision = allForDivision
-                    .Where(x =>
-                        (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) >= startDate.Value
-                    )
-                    .ToList();
+                query = query.Where(x =>
+                    (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) >= startDate.Value
+                );
             }
 
-            return allForDivision;
+            return query.ToList();
         }
 
         /// <summary>
@@ -194,7 +208,7 @@ namespace Monitoring.Infrastructure.Services
         /// </summary>
         public async Task<List<string>> GetExecutorsByDivisionId(int divisionId)
         {
-            var list = await _context.Users
+            return await _context.Users
                 .Where(u => u.IdDivision == divisionId && u.Isvalid == true)
                 .Select(u => u.SmallName)
                 .OrderBy(u => u)
@@ -202,18 +216,24 @@ namespace Monitoring.Infrastructure.Services
         }
 
         /// <summary>
-        /// Получаем список "принимающих" (Approvers) – пока сделаем так же, как Executors,
-        /// но в реальном проекте может быть другая логика
+        /// Получить список "принимающих" (в данном примере — то же самое).
         /// </summary>
         public async Task<List<string>> GetApproversByDivisionId(int divisionId)
         {
-            var list = await _context.Users
+            return await _context.Users
                 .Where(u => u.IdDivision == divisionId && u.Isvalid == true)
                 .Select(u => u.SmallName)
                 .OrderBy(u => u)
                 .ToListAsync();
+        }
 
-            return list;
+        /// <summary>
+        /// Очистить кэш для указ. division (или вообще).
+        /// </summary>
+        public void ClearCache(int divisionId)
+        {
+            string key = $"WorkItems_{divisionId}";
+            _cache.Remove(key);
         }
     }
 }

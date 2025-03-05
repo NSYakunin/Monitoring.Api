@@ -5,13 +5,13 @@ using Monitoring.Infrastructure.Data;
 using Monitoring.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.Extensions.Options;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1) Регистрируем настройки JWT (читаем из appsettings.json)
+// 1) Подтягиваем настройки JWT
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
 // 2) Извлекаем ключи и другие поля (для удобства)
@@ -20,18 +20,17 @@ var secretKey = jwtSection.GetValue<string>("SecretKey");
 var issuer = jwtSection.GetValue<string>("Issuer");
 var audience = jwtSection.GetValue<string>("Audience");
 
-// 3) Регистрация аутентификации с JWT
-builder.Services.AddAuthentication(options =>
+// 2) JWT-аутентификация
+builder.Services.AddAuthentication(opt =>
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    opt.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    opt.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 })
-.AddJwtBearer(options =>
+.AddJwtBearer(opt =>
 {
-    // Для упрощения отключим Https-метаданные и включим валидацию токена
-    options.RequireHttpsMetadata = false;
-    options.SaveToken = true;
-    options.TokenValidationParameters = new TokenValidationParameters
+    opt.RequireHttpsMetadata = false;
+    opt.SaveToken = true;
+    opt.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
         ValidIssuer = issuer,
@@ -44,37 +43,43 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// 4) Подключение к БД
+// 3) Подключаем EF Core к SQL
 builder.Services.AddDbContext<MyDbContext>(options =>
 {
-    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-    options.UseSqlServer(connectionString);
+    var cs = builder.Configuration.GetConnectionString("DefaultConnection");
+    options.UseSqlServer(cs);
 });
 
+// 4) Добавляем MemoryCache (для кэширования WorkItems)
+builder.Services.AddMemoryCache();
+
 // 5) Регистрируем наши сервисы
-builder.Services.AddScoped<IWorkItemAppService, WorkItemAppService>();
 builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
+builder.Services.AddScoped<IWorkItemAppService, WorkItemAppService>();
+builder.Services.AddScoped<IWorkRequestService, WorkRequestAppService>();
 
-// 6) Добавляем контроллеры + Swagger (если нужно)
+// 6) Контроллеры + Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// 7) CORS-политика, если требуется
-builder.Services.AddCors(options =>
+// 7) CORS при необходимости
+builder.Services.AddCors(opt =>
 {
-    options.AddPolicy("MyPolicy", policyBuilder =>
+    opt.AddPolicy("MyPolicy", policy =>
     {
-        policyBuilder.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
     });
 });
 
 var app = builder.Build();
 
+
 app.UseRouting();
+app.UseCors("MyPolicy");
+
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseCors("MyPolicy");
 
 app.MapControllers();
 app.Run();

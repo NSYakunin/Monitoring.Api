@@ -2,7 +2,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
+using System;
+using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace Monitoring.Api.Controllers
 {
@@ -12,7 +16,7 @@ namespace Monitoring.Api.Controllers
     public class WorkItemsController : ControllerBase
     {
         private readonly IWorkItemAppService _workItemAppService;
-        private readonly IUserSettingsService _userSettingsService; // для примера "GetAllowedDivisions"
+        private readonly IUserSettingsService _userSettingsService;
 
         public WorkItemsController(
             IWorkItemAppService workItemAppService,
@@ -25,8 +29,8 @@ namespace Monitoring.Api.Controllers
 
         /// <summary>
         /// GET /api/WorkItems
-        /// Параметры: ?startDate=2025-01-01&endDate=2025-02-01&executor=...&approver=...&search=...
-        /// divisionId берем из Claims (JWT).
+        /// Фильтры: ?startDate=...&endDate=...&executor=...&approver=...&search=...
+        /// divisionId берём из JWT claim.
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<WorkItemDto>>> GetFilteredWorkItems(
@@ -37,49 +41,33 @@ namespace Monitoring.Api.Controllers
             [FromQuery] string? search
         )
         {
-            try
+            var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
+            if (string.IsNullOrEmpty(divIdClaim))
             {
-                // Считываем divisionId из JWT
-                var userDivClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
-                if (string.IsNullOrEmpty(userDivClaim))
-                {
-                    return Forbid("У вас нет 'divisionId' в токене.");
-                }
-                int divisionId = int.Parse(userDivClaim);
-
-                // Логика дат по умолчанию (2014-01-01 ... конец текущего месяца)
-                if (!startDate.HasValue)
-                    startDate = new DateOnly(2014, 1, 1);
-
-                if (!endDate.HasValue)
-                {
-                    var now = DateTime.Now;
-                    // последний день текущего месяца
-                    endDate = new DateOnly(now.Year, now.Month, 1)
-                        .AddMonths(1)
-                        .AddDays(-1);
-                }
-
-                var items = await _workItemAppService.GetFilteredWorkItemsAsync(
-                    divisionId,
-                    startDate,
-                    endDate,
-                    executor,
-                    approver,
-                    search
-                );
-
-                return Ok(items);
+                return Forbid("Нет divisionId в токене");
             }
-            catch (Exception ex)
+
+            int divisionId = int.Parse(divIdClaim);
+
+            if (!startDate.HasValue)
+                startDate = new DateOnly(2014, 1, 1);
+            if (!endDate.HasValue)
             {
-                return StatusCode(500, "Ошибка сервера: " + ex.Message);
+                var now = DateTime.Now;
+                endDate = new DateOnly(now.Year, now.Month, 1)
+                    .AddMonths(1)
+                    .AddDays(-1);
             }
+
+            var items = await _workItemAppService.GetFilteredWorkItemsAsync(
+                divisionId, startDate, endDate, executor, approver, search
+            );
+            return Ok(items);
         }
 
         /// <summary>
         /// GET /api/WorkItems/AllowedDivisions
-        /// Возвращает "AllowedDivisions" для текущего пользователя, исходя из userId в токене
+        /// Возвращает список ID отделов, к которым пользователь имеет доступ (включая родной).
         /// </summary>
         [HttpGet("AllowedDivisions")]
         public async Task<ActionResult<List<int>>> GetAllowedDivisions()
@@ -87,25 +75,25 @@ namespace Monitoring.Api.Controllers
             try
             {
                 // Достаём userId из Claims
-                var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdClaim))
                 {
                     return Forbid("У вас нет userId в токене (ClaimTypes.NameIdentifier).");
                 }
-                int userId = int.Parse(userIdClaim);
+            int userId = int.Parse(userIdClaim);
 
                 var divisions = await _userSettingsService.GetUserAllowedDivisionsAsync(userId);
 
-                // При желании можем добавить в этот список и "свой" divisionId, если его там нет
-                var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
-                if (!string.IsNullOrEmpty(divIdClaim))
-                {
+            // Добавим родной, если нет
+            var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
+            if (!string.IsNullOrEmpty(divIdClaim))
+            {
                     int currentDivision = int.Parse(divIdClaim);
                     if (!divisions.Contains(currentDivision))
                     {
                         divisions.Add(currentDivision);
                     }
-                }
+            }
 
                 return Ok(divisions);
             }
@@ -124,9 +112,9 @@ namespace Monitoring.Api.Controllers
         {
             try
             {
-                var list = await _workItemAppService.GetExecutorsByDivisionId(divisionId);
-                return Ok(list);
-            }
+            var list = await _workItemAppService.GetExecutorsByDivisionId(divisionId);
+            return Ok(list);
+        }
             catch (Exception ex)
             {
                 return StatusCode(500, "Ошибка сервера: " + ex.Message);
@@ -149,6 +137,17 @@ namespace Monitoring.Api.Controllers
             {
                 return StatusCode(500, "Ошибка сервера: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// POST /api/WorkItems/ClearCache?divisionId=...
+        /// (Если хотите аналог "RefreshCache", как в Razor)
+        /// </summary>
+        [HttpPost("ClearCache")]
+        public ActionResult ClearCache([FromQuery] int divisionId)
+        {
+            _workItemAppService.ClearCache(divisionId);
+            return Ok(new { success = true });
         }
     }
 }

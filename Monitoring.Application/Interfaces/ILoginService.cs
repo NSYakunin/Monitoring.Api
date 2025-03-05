@@ -21,7 +21,8 @@
             string password
         );
 
-        // При необходимости здесь могут быть и другие методы:
-        // Task<int?> GetUserIdByNameAsync(string userName);
+        Task<List<string>> GetAllInactiveUsersAsync();
+
+        Task<int> GetUserIdByNameAsync(string userName);
     }
 }

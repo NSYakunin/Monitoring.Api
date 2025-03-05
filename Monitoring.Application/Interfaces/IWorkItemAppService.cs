@@ -35,5 +35,6 @@ namespace Monitoring.Application.Interfaces
         /// (может быть логика по роли, пока сделаем простой вариант)
         /// </summary>
         Task<List<string>> GetApproversByDivisionId(int divisionId);
+        void ClearCache(int divisionId);
     }
 }

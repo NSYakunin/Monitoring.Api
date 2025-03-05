@@ -1,9 +1,9 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Monitoring.Application.Interfaces;
 using Monitoring.Application.DTO;
-using Microsoft.Extensions.Options;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -27,8 +27,8 @@ namespace Monitoring.Api.Controllers
         }
 
         /// <summary>
-        /// Фильтрация пользователей (поиск).
         /// GET /api/Auth/FilterUsers?query=...
+        /// Фильтрация активных пользователей по подстроке.
         /// </summary>
         [HttpGet("FilterUsers")]
         [AllowAnonymous]
@@ -36,9 +36,9 @@ namespace Monitoring.Api.Controllers
         {
             try
             {
-                var result = await _loginService.FilterUsersAsync(query);
-                return Ok(result);
-            }
+            var result = await _loginService.FilterUsersAsync(query);
+            return Ok(result);
+        }
             catch (Exception ex)
             {
                 return StatusCode(500, "Ошибка сервера: " + ex.Message);
@@ -46,7 +46,8 @@ namespace Monitoring.Api.Controllers
         }
 
         /// <summary>
-        /// POST /api/Auth/Login (возвращаем JWT).
+        /// POST /api/Auth/Login
+        /// Проверка логина/пароля, выдача JWT.
         /// </summary>
         [HttpPost("Login")]
         [AllowAnonymous]
@@ -57,20 +58,14 @@ namespace Monitoring.Api.Controllers
             if (string.IsNullOrEmpty(request.Password))
                 return BadRequest("Не задан пароль");
 
-            var (userId, divisionId, isValid) =
-                await _loginService.CheckUserCredentialsAsync(request.SelectedUser, request.Password);
-
-            if (!isValid || !divisionId.HasValue || !userId.HasValue)
-            {
-                return Unauthorized("Неверное имя пользователя или пароль");
-            }
-
-            // Генерируем токен
-            var token = GenerateJwtToken(
-                userId.Value,
-                request.SelectedUser,
-                divisionId.Value
+            var (userId, divisionId, isValid) = await _loginService.CheckUserCredentialsAsync(
+                request.SelectedUser, request.Password
             );
+            if (!isValid || userId == null || divisionId == null)
+                return Unauthorized("Неверное имя пользователя или пароль.");
+
+            // Генерируем JWT
+            var token = GenerateJwtToken(userId.Value, request.SelectedUser, divisionId.Value);
 
             return Ok(new LoginResponse
             {
@@ -80,10 +75,6 @@ namespace Monitoring.Api.Controllers
             });
         }
 
-        /// <summary>
-        /// Пример защищённого эндпоинта – для проверки токена.
-        /// GET /api/Auth/TestAuth
-        /// </summary>
         [HttpGet("TestAuth")]
         [Authorize]
         public ActionResult<string> TestAuth()
@@ -91,13 +82,11 @@ namespace Monitoring.Api.Controllers
             var userName = User.Identity?.Name;
             var divId = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
             var userId = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
-
-            return Ok($"Вы авторизованы как {userName}, userId={userId}, divisionId={divId}");
+            return Ok($"Авторизован как {userName}, userId={userId}, divId={divId}");
         }
 
         private string GenerateJwtToken(int userId, string userName, int divisionId)
         {
-            // Добавляем userId, userName, divisionId в claims
             var claims = new List<Claim>
             {
                 new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
@@ -108,7 +97,6 @@ namespace Monitoring.Api.Controllers
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecretKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-            // Можно учесть _jwtSettings.ExpiresMinutes, тут - 8 часов для примера
             var token = new JwtSecurityToken(
                 issuer: _jwtSettings.Issuer,
                 audience: _jwtSettings.Audience,
