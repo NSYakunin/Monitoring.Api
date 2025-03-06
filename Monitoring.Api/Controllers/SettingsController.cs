@@ -34,7 +34,7 @@ namespace Monitoring.Api.Controllers
         ///  - Если передан selectedUser, подгружаем его настройки
         /// </summary>
         [HttpGet]
-        public async Task<ActionResult<SettingsLoadData>> GetSettings([FromQuery] bool showInactive, [FromQuery] string selectedUser)
+        public async Task<ActionResult<SettingsLoadData>> GetSettings([FromQuery] bool showInactive, [FromQuery] string? selectedUser)
         {
             // 1) Проверяем, есть ли у текущего userId право на доступ к настройкам
             var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;

@@ -1,22 +1,18 @@
 ﻿using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
-using Monitoring.Infrastructure.Data;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory; // Для кэша
+using Microsoft.Extensions.Configuration;
+using System.Data.SqlClient;
+using System.Threading.Tasks;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
-using Monitoring.Domain.Entities;
-using System.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
+using Monitoring.Infrastructure.Data;
+using Monitoring.Infrastructure.Data.ScaffoldModels;
 
 namespace Monitoring.Infrastructure.Services
 {
-    /// <summary>
-    /// Сервис для получения списка работ (WorkItems) по отделам и фильтрам.
-    /// Содержит кэширование, аналогичное старому коду Razor.
-    /// </summary>
     public class WorkItemAppService : IWorkItemAppService
     {
         private readonly MyDbContext _context;
@@ -37,10 +33,6 @@ namespace Monitoring.Infrastructure.Services
             _userSettingsService = userSettingsService;
         }
 
-        /// <summary>
-        /// Основной метод для фильтра. Сначала берём из кэша все работы по конкретному divisionId,
-        /// затем делаем in-memory фильтрацию.
-        /// </summary>
         public async Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(
             int divisionId,
             DateTime? startDate,
@@ -51,37 +43,36 @@ namespace Monitoring.Infrastructure.Services
             int userIdClaim
         )
         {
-            // Сначала убеждаемся, что пользователь действительно имеет доступ к этому divisionId
+            // Убеждаемся, что у пользователя есть доступ к этому divisionId
             var userDivs = await _userSettingsService.GetUserAllowedDivisionsAsync(userIdClaim);
-            if (!userDivs.Contains(divisionId))
+            if (userDivs.Count == 0)
             {
-                // Либо возвращаем пустой список,
-                // либо бросаем исключение/возвращаем 403 (как удобнее).
-                return new List<WorkItemDto>();
+                // Если нет записей, значит доступен только родной
+                userDivs.Add(divisionId);
             }
 
-            // Грузим весь список работ (с кэшем) для данного divisionId
+            //// Убеждаемся, что у пользователя есть доступ к этому divisionId
+            //if (!userDivs.Contains(divisionId))
+            //{
+            //    // Можем вернуть пустой список либо выбросить 403
+            //    return new List<WorkItemDto>();
+            //}
+
+            // Грузим все работы (из кэша) для одного отдела
             var all = await GetWorkItemsByDivisionAsync(new List<int> { divisionId });
 
-            // Далее фильтруем
+            // Фильтруем in-memory
             var query = all.AsQueryable();
 
-            // Фильтр по исполнителю
             if (!string.IsNullOrEmpty(executor))
             {
-                query = query.Where(x =>
-                    x.Executor != null &&
-                    x.Executor.Contains(executor, StringComparison.OrdinalIgnoreCase));
+                query = query.Where(x => x.Executor != null &&
+                                         x.Executor.Contains(executor, StringComparison.OrdinalIgnoreCase));
             }
-
-            // Фильтр по принимающему
             if (!string.IsNullOrEmpty(approver))
             {
-                query = query.Where(x =>
-                    (x.Approver ?? "").Contains(approver, StringComparison.OrdinalIgnoreCase));
+                query = query.Where(x => (x.Approver ?? "").Contains(approver, StringComparison.OrdinalIgnoreCase));
             }
-
-            // Фильтр search
             if (!string.IsNullOrEmpty(search))
             {
                 query = query.Where(x =>
@@ -93,35 +84,24 @@ namespace Monitoring.Infrastructure.Services
                 );
             }
 
-            // Фильтр по дате <= endDate
             if (endDate.HasValue)
             {
-                query = query.Where(x =>
-                    (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= endDate.Value
-                );
+                query = query.Where(x => (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= endDate.Value);
             }
-
-            // Фильтр по дате >= startDate
             if (startDate.HasValue)
             {
-                query = query.Where(x =>
-                    (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) >= startDate.Value
-                );
+                query = query.Where(x => (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) >= startDate.Value);
             }
 
             return query.ToList();
         }
 
-        /// <summary>
-        /// Возвращает список работ по указанному(ым) отделам, используя SQL-запрос + кэширование.
-        /// Если передать 1 отдел, то кэш будет конкретно на этот id.
-        /// </summary>
         public async Task<List<WorkItemDto>> GetWorkItemsByDivisionAsync(List<int> divisionIds)
         {
             if (divisionIds == null || divisionIds.Count == 0)
                 return new List<WorkItemDto>();
 
-            // Сортируем, формируем ключ кэша
+            // Формируем ключ кэша
             var sorted = divisionIds.OrderBy(x => x).ToList();
             string keyPart = string.Join("_", sorted);
             string cacheKey = $"AllWorkItems_{keyPart}";
@@ -175,7 +155,7 @@ namespace Monitoring.Infrastructure.Services
                 using (var conn = new SqlConnection(_connectionString))
                 using (var cmd = new SqlCommand(query, conn))
                 {
-                    // Проставляем параметры
+                    // Подставляем параметры
                     for (int i = 0; i < sorted.Count; i++)
                     {
                         cmd.Parameters.AddWithValue(paramNames[i], sorted[i]);
@@ -196,13 +176,13 @@ namespace Monitoring.Infrastructure.Services
                             string executor = reader["Executor"]?.ToString();
                             string controller = reader["Controller"]?.ToString();
                             string approver = reader["Approver"]?.ToString();
-                            DateTime? planDate = reader["DatePlan"] as DateTime?;
+                            DateTime? planDate = (reader["DatePlan"] as DateTime?);
                             DateTime? kor1 = reader["DateKorrect1"] as DateTime?;
                             DateTime? kor2 = reader["DateKorrect2"] as DateTime?;
                             DateTime? kor3 = reader["DateKorrect3"] as DateTime?;
                             DateTime? factDate = reader["DateFact"] as DateTime?;
 
-                            // Формируем ключ
+                            // Ключ для агрегации
                             string key = $"{docName}|{workName}|{approver}|{planDate}|{kor1}|{kor2}|{kor3}|{factDate}|{idWork}";
 
                             if (!dict.ContainsKey(key))
@@ -224,7 +204,7 @@ namespace Monitoring.Infrastructure.Services
                             }
                             else
                             {
-                                // Агрегация исполнителей
+                                // Если запись уже есть, дополняем исполнителей
                                 var existing = dict[key];
                                 if (!string.IsNullOrWhiteSpace(executor))
                                 {
@@ -238,14 +218,13 @@ namespace Monitoring.Infrastructure.Services
                                         existing.Executor = string.Join(", ", arr);
                                     }
                                 }
-                                // Аналогично можно дополнять контроллеров, если нужно
                             }
                         }
                     }
                     workItems = dict.Values.ToList();
                 }
 
-                // Кэшируем результат
+                // Сохраняем в кэш
                 var cacheOptions = new MemoryCacheEntryOptions
                 {
                     AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
@@ -257,11 +236,40 @@ namespace Monitoring.Infrastructure.Services
         }
 
         /// <summary>
-        /// Возвращаем список исполнителей внутри отдела
-        /// (просто через EF, без кэша, или можно тоже добавить кэш).
+        /// Получить "имя" отдела (smallNameDivision).
+        /// Если оно пустое, вернём "Отдел #{divisionId}".
         /// </summary>
+        public async Task<string> GetDevNameAsync(int divisionId)
+        {
+            string resultName = $"Отдел #{divisionId}";
+
+            using (var conn = new SqlConnection(_connectionString))
+            {
+                string query = @"
+                    SELECT smallNameDivision
+                    FROM Divisions
+                    WHERE idDivision = @divId
+                ";
+                using (var cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@divId", divisionId);
+                    await conn.OpenAsync();
+                    object obj = await cmd.ExecuteScalarAsync();
+                    if (obj != null && obj != DBNull.Value)
+                    {
+                        string fromDb = obj.ToString();
+                        if (!string.IsNullOrWhiteSpace(fromDb))
+                            resultName = fromDb;
+                    }
+                }
+            }
+
+            return resultName;
+        }
+
         public async Task<List<string>> GetExecutorsByDivisionId(int divisionId)
         {
+            // Можно без кэша
             return await _context.Users
                 .Where(u => u.IdDivision == divisionId && u.Isvalid == true)
                 .Select(u => u.SmallName)
@@ -269,12 +277,9 @@ namespace Monitoring.Infrastructure.Services
                 .ToListAsync();
         }
 
-        /// <summary>
-        /// Получаем список "принимающих" (аналогично).
-        /// </summary>
         public async Task<List<string>> GetApproversByDivisionId(int divisionId)
         {
-            // Если хотите отличать Approver от Executor, делайте свою логику
+            // Аналогично
             return await _context.Users
                 .Where(u => u.IdDivision == divisionId && u.Isvalid == true)
                 .Select(u => u.SmallName)
@@ -282,19 +287,10 @@ namespace Monitoring.Infrastructure.Services
                 .ToListAsync();
         }
 
-        /// <summary>
-        /// Сброс кэша для указ. отдела.
-        /// </summary>
         public void ClearCache(int divisionId)
         {
-            // Ключи кэша формируются как AllWorkItems_{списокID}.
-            // Поэтому надо удалить ключ, который содержит нужный divisionId.
-            // Если у нас кэш по одиночному отделу, ключ будет AllWorkItems_divId.
             string singleKey = $"AllWorkItems_{divisionId}";
             _cache.Remove(singleKey);
-
-            // Если где-то кэшировались мульти-отделы, можно пройтись по всем ключам в _cache,
-            // искать "AllWorkItems_" и проверять, есть ли там id. Но это опционально.
         }
     }
 }

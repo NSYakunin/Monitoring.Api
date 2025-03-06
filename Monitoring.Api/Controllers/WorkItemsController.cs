@@ -27,12 +27,6 @@ namespace Monitoring.Api.Controllers
             _userSettingsService = userSettingsService;
         }
 
-        /// <summary>
-        /// GET /api/WorkItems
-        /// Теперь принимаем дополнительный параметр ?divisionId=... 
-        /// Если он не задан, то fallback на divisionId из токена
-        /// Фильтры: ?startDate=...&endDate=...&executor=...&approver=...&search=...
-        /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<WorkItemDto>>> GetFilteredWorkItems(
             [FromQuery] DateTime? startDate,
@@ -40,42 +34,35 @@ namespace Monitoring.Api.Controllers
             [FromQuery] string? executor,
             [FromQuery] string? approver,
             [FromQuery] string? search,
-            [FromQuery] int? divisionId // <-- Новый параметр
+            [FromQuery] int? divisionId
         )
         {
-            // Читаем userId из Claims
             var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrEmpty(userIdClaim))
-            {
-                return Forbid("В токене не найден ClaimTypes.NameIdentifier (userId).");
-            }
+                return Forbid("Нет userId");
+
             int userId = int.Parse(userIdClaim);
 
-            // Читаем divisionId (родной отдел) из Claims (если ничего не пришло в Query).
+            // Родной отдел (если divisionId не передали)
             var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
             if (string.IsNullOrEmpty(divIdClaim))
-            {
                 return Forbid("Нет divisionId в токене");
-            }
-            int userHomeDivId = int.Parse(divIdClaim);
 
-            // Если в query не пришёл divisionId, берём из токена
-            int realDivisionId = divisionId ?? userHomeDivId;
+            int homeDivId = int.Parse(divIdClaim);
 
-            // Дефолтные даты, если не заданы
+            int realDivId = divisionId ?? homeDivId;
+
             if (!startDate.HasValue)
                 startDate = new DateTime(2014, 1, 1);
 
             if (!endDate.HasValue)
             {
                 var now = DateTime.Now;
-                // Последний день текущего месяца
                 endDate = new DateTime(now.Year, now.Month, 1).AddMonths(1).AddDays(-1);
             }
 
-            // Вызываем наш сервис, аналогично старому коду
-            var items = await _workItemAppService.GetFilteredWorkItemsAsync(
-                realDivisionId,
+            var result = await _workItemAppService.GetFilteredWorkItemsAsync(
+                realDivId,
                 startDate,
                 endDate,
                 executor,
@@ -83,38 +70,26 @@ namespace Monitoring.Api.Controllers
                 search,
                 userId
             );
-
-            return Ok(items);
+            return Ok(result);
         }
 
-        /// <summary>
-        /// GET /api/WorkItems/AllowedDivisions
-        /// Возвращает список ID отделов, к которым пользователь имеет доступ (включая родной).
-        /// </summary>
         [HttpGet("AllowedDivisions")]
         public async Task<ActionResult<List<int>>> GetAllowedDivisions()
         {
             try
             {
-                // Достаём userId из Claims
                 var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
-                if (string.IsNullOrEmpty(userIdClaim))
-                {
-                    return Forbid("У вас нет userId в токене (ClaimTypes.NameIdentifier).");
-                }
+                if (userIdClaim == null) return Forbid("Нет userId");
                 int userId = int.Parse(userIdClaim);
 
                 var divisions = await _userSettingsService.GetUserAllowedDivisionsAsync(userId);
 
-                // Добавим родной, если не входит
                 var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
                 if (!string.IsNullOrEmpty(divIdClaim))
                 {
-                    int currentDivision = int.Parse(divIdClaim);
-                    if (!divisions.Contains(currentDivision))
-                    {
-                        divisions.Add(currentDivision);
-                    }
+                    int homeDiv = int.Parse(divIdClaim);
+                    if (!divisions.Contains(homeDiv))
+                        divisions.Add(homeDiv);
                 }
 
                 return Ok(divisions);
@@ -125,10 +100,6 @@ namespace Monitoring.Api.Controllers
             }
         }
 
-        /// <summary>
-        /// GET /api/WorkItems/Executors?divisionId=...
-        /// Для загрузки списка исполнителей.
-        /// </summary>
         [HttpGet("Executors")]
         public async Task<ActionResult<List<string>>> GetExecutors([FromQuery] int divisionId)
         {
@@ -143,10 +114,6 @@ namespace Monitoring.Api.Controllers
             }
         }
 
-        /// <summary>
-        /// GET /api/WorkItems/Approvers?divisionId=...
-        /// Для загрузки списка принимающих.
-        /// </summary>
         [HttpGet("Approvers")]
         public async Task<ActionResult<List<string>>> GetApprovers([FromQuery] int divisionId)
         {
@@ -162,9 +129,23 @@ namespace Monitoring.Api.Controllers
         }
 
         /// <summary>
-        /// POST /api/WorkItems/ClearCache?divisionId=...
-        /// Аналог "RefreshCache" из Razor.
+        /// НОВЫЙ метод: Возвращает строку с названием отдела.
+        /// GET /api/WorkItems/DivisionName?divisionId=XX
         /// </summary>
+        [HttpGet("DivisionName")]
+        public async Task<ActionResult<string>> GetDivisionName([FromQuery] int divisionId)
+        {
+            try
+            {
+                var name = await _workItemAppService.GetDevNameAsync(divisionId);
+                return Ok(name);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Ошибка: " + ex.Message);
+            }
+        }
+
         [HttpPost("ClearCache")]
         public ActionResult ClearCache([FromQuery] int divisionId)
         {
