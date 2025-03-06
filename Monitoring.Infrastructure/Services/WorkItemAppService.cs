@@ -218,6 +218,21 @@ namespace Monitoring.Infrastructure.Services
                                         existing.Executor = string.Join(", ", arr);
                                     }
                                 }
+
+                                // Агрегация контролирующих (Controller)
+                                if (!string.IsNullOrWhiteSpace(controller))
+                                {
+                                    var ctrlList = existing.Controller
+                                        .Split(",", StringSplitOptions.RemoveEmptyEntries)
+                                        .Select(x => x.Trim())
+                                        .ToList();
+
+                                    if (!ctrlList.Contains(controller))
+                                    {
+                                        ctrlList.Add(controller);
+                                        existing.Controller = string.Join(", ", ctrlList);
+                                    }
+                                }
                             }
                         }
                     }
