@@ -58,6 +58,7 @@ builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
 builder.Services.AddScoped<IWorkItemAppService, WorkItemAppService>();
 builder.Services.AddScoped<IWorkRequestService, WorkRequestAppService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 // 6) Контроллеры + Swagger
 builder.Services.AddControllers();

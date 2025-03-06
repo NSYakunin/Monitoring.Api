@@ -51,7 +51,7 @@ namespace Monitoring.Api.Controllers
         /// </summary>
         [HttpPost("Login")]
         [AllowAnonymous]
-        public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
+        public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequestDto request)
         {
             if (string.IsNullOrEmpty(request.SelectedUser))
                 return BadRequest("Не задано имя пользователя");
