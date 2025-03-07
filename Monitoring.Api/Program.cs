@@ -7,20 +7,19 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1) Подтягиваем настройки JWT
+// 1) JWT Configuration
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
-
-// 2) Извлекаем ключи и другие поля (для удобства)
 var jwtSection = builder.Configuration.GetSection("JwtSettings");
 var secretKey = jwtSection.GetValue<string>("SecretKey");
 var issuer = jwtSection.GetValue<string>("Issuer");
 var audience = jwtSection.GetValue<string>("Audience");
 
-// 2) JWT-аутентификация
+// 2) Authentication
 builder.Services.AddAuthentication(opt =>
 {
     opt.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -38,33 +37,66 @@ builder.Services.AddAuthentication(opt =>
         ValidAudience = audience,
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
-        ValidateLifetime = true,
+        // На боевом сервере вкл. ValidateLifetime = true
+        ValidateLifetime = false,
         ClockSkew = TimeSpan.Zero
     };
 });
 
-// 3) Подключаем EF Core к SQL
+// 3) Database
 builder.Services.AddDbContext<MyDbContext>(options =>
-{
-    var cs = builder.Configuration.GetConnectionString("DefaultConnection");
-    options.UseSqlServer(cs);
-});
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// 4) Добавляем MemoryCache (для кэширования WorkItems)
+// 4) MemoryCache
 builder.Services.AddMemoryCache();
 
-// 5) Регистрируем наши сервисы
+// 5) Services
 builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
 builder.Services.AddScoped<IWorkItemAppService, WorkItemAppService>();
 builder.Services.AddScoped<IWorkRequestService, WorkRequestAppService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 
-// 6) Контроллеры + Swagger
+// 6) Swagger configuration
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Monitoring API",
+        Version = "v1",
+        Description = "API for monitoring system"
+    });
+
+    // JWT Auth configuration for Swagger
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] {}
+        }
+    });
+});
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// 7) CORS при необходимости
+// 7) CORS
 builder.Services.AddCors(opt =>
 {
     opt.AddPolicy("MyPolicy", policy =>
@@ -75,12 +107,18 @@ builder.Services.AddCors(opt =>
 
 var app = builder.Build();
 
+// Middleware pipeline
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Monitoring API V1");
+});
 
 app.UseRouting();
 app.UseCors("MyPolicy");
-
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
 app.Run();
