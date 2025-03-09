@@ -29,16 +29,23 @@ namespace Monitoring.Api.Controllers
         /// <summary>
         /// GET /api/Auth/FilterUsers?query=...
         /// Фильтрация активных пользователей по подстроке.
+        /// Может быть пустая, тогда вернём всех активных пользователей.
         /// </summary>
         [HttpGet("FilterUsers")]
         [AllowAnonymous]
-        public async Task<ActionResult<List<string>>> FilterUsers([FromQuery] string query)
+        public async Task<ActionResult<List<string>>> FilterUsers([FromQuery] string? query)
         {
             try
             {
-            var result = await _loginService.FilterUsersAsync(query);
-            return Ok(result);
-        }
+                // Например, если query null или менее 3 символов, возвращать пустой список:
+                if (string.IsNullOrWhiteSpace(query) || query.Length < 3)
+                {
+                    return Ok(new List<string>()); // пустой список
+                }
+
+                var result = await _loginService.FilterUsersAsync(query);
+                return Ok(result);
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, "Ошибка сервера: " + ex.Message);
