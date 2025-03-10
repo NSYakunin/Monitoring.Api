@@ -86,6 +86,7 @@ namespace Monitoring.Infrastructure.Services
 
             if (endDate.HasValue)
             {
+                // Логика, аналогичная вашему Razor-frontend: берем кор.3, или кор.2, или кор.1, или planDate
                 query = query.Where(x => (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= endDate.Value);
             }
             if (startDate.HasValue)
