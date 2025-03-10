@@ -1,18 +1,17 @@
-﻿using Monitoring.Application.Interfaces;
-using Monitoring.Domain.Entities; // Или DTO
+﻿// Monitoring.Infrastructure.Services.WorkRequestAppService
+
+using Monitoring.Application.Interfaces;
+using Monitoring.Domain.Entities;
 using Monitoring.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System;
-using System.Linq;
 using Monitoring.Infrastructure.Data.ScaffoldModels;
 
 namespace Monitoring.Infrastructure.Services
 {
-    /// <summary>
-    /// Работа с таблицей Requests (заявки).
-    /// </summary>
     public class WorkRequestAppService : IWorkRequestService
     {
         private readonly MyDbContext _context;
@@ -24,8 +23,6 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task<int> CreateRequestAsync(WorkRequest request)
         {
-            // Допустим, у нас есть EF-сущность Request (из ScaffoldModels).
-            // Переносим поля из WorkRequest (Domain) в Request (EF).
             var entity = new Request
             {
                 WorkDocumentNumber = request.WorkDocumentNumber,
@@ -34,11 +31,11 @@ namespace Monitoring.Infrastructure.Services
                 RequestType = request.RequestType,
                 Sender = request.Sender,
                 Receiver = request.Receiver,
-                RequestDate = DateTime.Now,
-                IsDone = false,
+                RequestDate = request.RequestDate,
+                IsDone = request.IsDone,
                 Note = request.Note,
                 ProposedDate = request.ProposedDate,
-                Status = "Pending",
+                Status = request.Status,
                 Executor = request.Executor,
                 Controller = request.Controller,
                 PlanDate = request.PlanDate,
@@ -49,7 +46,6 @@ namespace Monitoring.Infrastructure.Services
 
             _context.Requests.Add(entity);
             await _context.SaveChangesAsync();
-
             return entity.Id;
         }
 
@@ -59,7 +55,6 @@ namespace Monitoring.Infrastructure.Services
                 .Where(r => r.WorkDocumentNumber == docNumber)
                 .ToListAsync();
 
-            // Мапим в WorkRequest
             return list.Select(r => new WorkRequest
             {
                 Id = r.Id,
@@ -70,7 +65,7 @@ namespace Monitoring.Infrastructure.Services
                 Sender = r.Sender,
                 Receiver = r.Receiver,
                 RequestDate = r.RequestDate,
-                IsDone = r.IsDone ? true : false,
+                IsDone = r.IsDone,
                 Note = r.Note,
                 ProposedDate = r.ProposedDate,
                 Status = r.Status,
@@ -86,11 +81,9 @@ namespace Monitoring.Infrastructure.Services
         public async Task<List<WorkRequest>> GetPendingRequestsByReceiverAsync(string receiver)
         {
             var list = await _context.Requests
-                .Where(r =>
-                    r.Receiver == receiver
-                    && r.Status == "Pending"
-                    && (r.IsDone == false || r.IsDone == null)
-                )
+                .Where(r => r.Receiver == receiver
+                            && r.Status == "Pending"
+                            && !r.IsDone)
                 .ToListAsync();
 
             return list.Select(r => new WorkRequest
@@ -103,7 +96,7 @@ namespace Monitoring.Infrastructure.Services
                 Sender = r.Sender,
                 Receiver = r.Receiver,
                 RequestDate = r.RequestDate,
-                IsDone = r.IsDone ? true : false,
+                IsDone = r.IsDone,
                 Note = r.Note,
                 ProposedDate = r.ProposedDate,
                 Status = r.Status,
@@ -118,35 +111,32 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task SetRequestStatusAsync(int requestId, string newStatus)
         {
-            // Найдём заявку:
             var req = await _context.Requests.FirstOrDefaultAsync(r => r.Id == requestId);
             if (req == null) return;
 
-            // Если "Accepted", нужно поправить WorkUser (dateFact, dateKorrect1/2/3) в зависимости от типа
             if (newStatus == "Accepted")
             {
-                // По типу заявки (req.RequestType) определяем, какую дату обновлять
-                // Идёт поиск idWork = число после слэша в WorkDocumentNumber
-                // И поиск userId = sender, ... (как в вашем коде)
-                // Здесь для краткости пропущу подробности, но вы можете сделать по аналогии:
-                if (!string.IsNullOrEmpty(req.WorkDocumentNumber) && req.WorkDocumentNumber.Contains("/"))
+                // Логика обновления WorkUser, как в Razor:
+                // Парсим idWork из WorkDocumentNumber (после слэша)
+                if (!string.IsNullOrEmpty(req.WorkDocumentNumber) &&
+                    req.WorkDocumentNumber.Contains("/"))
                 {
                     var parts = req.WorkDocumentNumber.Split('/');
                     if (int.TryParse(parts[^1], out int workId))
                     {
-                        // найдём userId
-                        var userId = await _context.Users
+                        // находим userId (sender)
+                        var senderUserId = await _context.Users
                             .Where(u => u.SmallName == req.Sender)
                             .Select(u => u.IdUser)
                             .FirstOrDefaultAsync();
 
-                        if (userId > 0 && req.ProposedDate.HasValue)
+                        if (senderUserId > 0 && req.ProposedDate.HasValue)
                         {
                             var wu = await _context.WorkUsers
-                                .FirstOrDefaultAsync(x => x.IdWork == workId && x.IdUser == userId);
+                                .FirstOrDefaultAsync(w => w.IdWork == workId && w.IdUser == senderUserId);
                             if (wu != null)
                             {
-                                switch ((req.RequestType ?? "").ToLower())
+                                switch (req.RequestType?.ToLower())
                                 {
                                     case "факт":
                                         wu.DateFact = req.ProposedDate.Value;
@@ -167,7 +157,6 @@ namespace Monitoring.Infrastructure.Services
                 }
             }
 
-            // Обновляем статус заявки
             req.Status = newStatus;
             req.IsDone = true;
             await _context.SaveChangesAsync();
@@ -177,8 +166,7 @@ namespace Monitoring.Infrastructure.Services
         {
             var entity = await _context.Requests.FirstOrDefaultAsync(r => r.Id == req.Id);
             if (entity == null) return;
-
-            if (entity.Status != "Pending") return; // уже нельзя трогать
+            if (entity.Status != "Pending") return; // уже обработана
 
             entity.RequestType = req.RequestType;
             entity.Receiver = req.Receiver;
@@ -192,7 +180,7 @@ namespace Monitoring.Infrastructure.Services
         {
             var entity = await _context.Requests.FirstOrDefaultAsync(r => r.Id == requestId);
             if (entity == null) return;
-            if (entity.Status != "Pending") return; // нельзя удалить, если уже обработана
+            if (entity.Status != "Pending") return; // уже обработана
 
             _context.Requests.Remove(entity);
             await _context.SaveChangesAsync();
