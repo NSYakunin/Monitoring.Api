@@ -2,12 +2,13 @@
 using Microsoft.AspNetCore.Mvc;
 using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
+using Monitoring.Infrastructure.Services;
 using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using Monitoring.Infrastructure.Services;
+using Monitoring.Application.Services;
 
 namespace Monitoring.Api.Controllers
 {
@@ -187,6 +188,157 @@ namespace Monitoring.Api.Controllers
         {
             _workItemAppService.ClearCache(divisionId);
             return Ok(new { success = true });
+        }
+
+        // ----------------------------------------------------------------
+        //  НОВЫЙ Метод "Export", аналог Razor OnPostAsync() из IndexModel
+        // ----------------------------------------------------------------
+        [HttpPost("Export")]
+        public async Task<IActionResult> Export([FromBody] ExportRequestDto request)
+        {
+            try
+            {
+                // 1) Проверяем JWT
+                var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+                var userName = User.Identity?.Name;
+                var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
+
+                if (string.IsNullOrEmpty(userIdClaim) || string.IsNullOrEmpty(userName) || string.IsNullOrEmpty(divIdClaim))
+                {
+                    return Forbid("Нет необходимых данных в токене (userId, userName, divisionId).");
+                }
+
+                int userId = int.Parse(userIdClaim);
+                int homeDivisionId = int.Parse(divIdClaim);
+
+                // 2) Определяем реальный отдел
+                int actualDivisionId = request.DivisionId ?? homeDivisionId;
+
+                // 3) Подгружаем список работ с учётом фильтров
+                var startDate = request.StartDate ?? new DateTime(2014, 1, 1);
+                var endDate = request.EndDate ?? DateTime.Now;
+
+                var workItems = await _workItemAppService.GetFilteredWorkItemsAsync(
+                    actualDivisionId,
+                    startDate,
+                    endDate,
+                    request.Executor,
+                    request.Approver,
+                    request.Search,
+                    userId
+                );
+
+                // 4) Узнаем "название" подразделения
+                string depName = await _workItemAppService.GetDevNameAsync(actualDivisionId);
+
+                // 5) Если в запросе переданы выбранные позиции (SelectedItems), фильтруем и/или упорядочиваем
+                var selectedDocs = request.SelectedItems ?? new List<string>();
+                if (selectedDocs.Count > 0)
+                {
+                    // 5.1) Оставляем только те, что в списке selectedDocs (если они есть в workItems)
+                    // 5.2) Сортируем в порядке selectedDocs
+                    var filtered = workItems
+                        .Where(w => selectedDocs.Contains(w.DocumentNumber))
+                        .OrderBy(w => selectedDocs.IndexOf(w.DocumentNumber))
+                        .ToList();
+                    workItems = filtered;
+                }
+                else
+                {
+                    // Если ничего не выбрано - берём все (как в Razor)
+                    // Можно оставить как есть, workItems уже загружены
+                }
+
+                // 6) Генерируем нужный тип отчёта
+                string format = request.Format?.ToLower() ?? "pdf";
+
+                if (format == "pdf")
+                {
+                    var pdfBytes = ReportGenerator.GeneratePdf(
+                        // конвертируем WorkItemDto -> WorkItem (т.к. методы ReportGenerator* используют старый тип),
+                        // но у нас, по сути, поля те же. Можно написать маппер вручную:
+                        workItems.Select(x => new Domain.Entities.WorkItem
+                        {
+                            DocumentNumber = x.DocumentNumber,
+                            DocumentName = x.DocumentName,
+                            WorkName = x.WorkName,
+                            Executor = x.Executor,
+                            Controller = x.Controller,
+                            Approver = x.Approver,
+                            PlanDate = x.PlanDate == null ? (DateTime?)null : x.PlanDate,
+                            Korrect1 = x.Korrect1 == null ? (DateTime?)null : x.Korrect1,
+                            Korrect2 = x.Korrect2 == null ? (DateTime?)null : x.Korrect2,
+                            Korrect3 = x.Korrect3 == null ? (DateTime?)null : x.Korrect3,
+                            FactDate = x.FactDate == null ? (DateTime?)null : x.FactDate
+                        }).ToList(),
+                        $"Сдаточный чек от {DateTime.Now:dd.MM.yyyy}",
+                        depName
+                    );
+
+                    return File(pdfBytes, "application/pdf", $"Check_{DateTime.Now:yyyyMMdd}.pdf");
+                }
+                else if (format == "excel")
+                {
+                    var excelBytes = ReportGeneratorExcel.GenerateExcel(
+                        workItems.Select(x => new Domain.Entities.WorkItem
+                        {
+                            DocumentNumber = x.DocumentNumber,
+                            DocumentName = x.DocumentName,
+                            WorkName = x.WorkName,
+                            Executor = x.Executor,
+                            Controller = x.Controller,
+                            Approver = x.Approver,
+                            PlanDate = x.PlanDate == null ? (DateTime?)null : x.PlanDate,
+                            Korrect1 = x.Korrect1 == null ? (DateTime?)null : x.Korrect1,
+                            Korrect2 = x.Korrect2 == null ? (DateTime?)null : x.Korrect2,
+                            Korrect3 = x.Korrect3 == null ? (DateTime?)null : x.Korrect3,
+                            FactDate = x.FactDate == null ? (DateTime?)null : x.FactDate
+                        }).ToList(),
+                        $"Сдаточный чек от {DateTime.Now:dd.MM.yyyy}",
+                        depName
+                    );
+                    return File(
+                        excelBytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        $"Check_{DateTime.Now:yyyyMMdd}.xlsx"
+                    );
+                }
+                else if (format == "word")
+                {
+                    var docBytes = ReportGeneratorWord.GenerateWord(
+                        workItems.Select(x => new Domain.Entities.WorkItem
+                        {
+                            DocumentNumber = x.DocumentNumber,
+                            DocumentName = x.DocumentName,
+                            WorkName = x.WorkName,
+                            Executor = x.Executor,
+                            Controller = x.Controller,
+                            Approver = x.Approver,
+                            PlanDate = x.PlanDate == null ? (DateTime?)null : x.PlanDate,
+                            Korrect1 = x.Korrect1 == null ? (DateTime?)null : x.Korrect1,
+                            Korrect2 = x.Korrect2 == null ? (DateTime?)null : x.Korrect2,
+                            Korrect3 = x.Korrect3 == null ? (DateTime?)null : x.Korrect3,
+                            FactDate = x.FactDate == null ? (DateTime?)null : x.FactDate
+                        }).ToList(),
+                        $"Сдаточный чек от {DateTime.Now:dd.MM.yyyy}",
+                        depName
+                    );
+                    return File(
+                        docBytes,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        $"Check_{DateTime.Now:yyyyMMdd}.docx"
+                    );
+                }
+                else
+                {
+                    // Если формат неизвестен, просто вернём BadRequest
+                    return BadRequest("Неизвестный формат экспорта.");
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Ошибка при экспорте: " + ex.Message);
+            }
         }
     }
 }
