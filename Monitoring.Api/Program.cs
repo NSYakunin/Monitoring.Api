@@ -1,4 +1,5 @@
 using Monitoring.Api.Extensions;
+using QuestPDF.Infrastructure;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +15,9 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddCustomCors();                                // 7) CORS
 
 var app = builder.Build();
+
+// Например, сразу укажем лицензию QuestPDF
+QuestPDF.Settings.License = LicenseType.Community;
 
 // Настраиваем Middleware Pipeline
 app.UseSwaggerDocumentation();  // Подключаем Swagger
