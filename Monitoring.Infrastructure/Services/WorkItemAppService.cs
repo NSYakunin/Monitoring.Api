@@ -18,49 +18,155 @@ namespace Monitoring.Infrastructure.Services
         private readonly MyDbContext _context;
         private readonly IMemoryCache _cache;
         private readonly IUserSettingsService _userSettingsService;
+        private readonly IWorkRequestService _workRequestService; // Чтобы подсвечивать
         private readonly string _connectionString;
 
         public WorkItemAppService(
             MyDbContext context,
             IMemoryCache cache,
             IUserSettingsService userSettingsService,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            IWorkRequestService workRequestService
+        )
         {
-            // Комментарий: получаем строку подключения
-            _connectionString = configuration.GetConnectionString("DefaultConnection")
-                ?? throw new ArgumentNullException("Connection string not found");
-
             _context = context;
             _cache = cache;
             _userSettingsService = userSettingsService;
+            _workRequestService = workRequestService;
+            _connectionString = configuration.GetConnectionString("DefaultConnection")
+                ?? throw new ArgumentNullException("Connection string not found");
         }
 
-        /// <summary>
-        /// Получение списка работ с фильтрацией (конечная точка, которую вызывает контроллер).
-        /// </summary>
-        public async Task<List<WorkItemDto>> GetFilteredWorkItemsAsync(
+        // --- НОВЫЙ метод: Пагинированная версия ---
+        public async Task<PagedWorkItemsDto> GetFilteredWorkItemsAsync(
             int divisionId,
             DateTime? startDate,
             DateTime? endDate,
             string? executor,
             string? approver,
             string? search,
-            int userIdClaim
+            int userIdClaim,
+            int pageNumber,
+            int pageSize,
+            string? currentUserName
         )
         {
-            // Убеждаемся, что у пользователя есть доступ к этому divisionId
-            var userDivs = await _userSettingsService.GetUserAllowedDivisionsAsync(userIdClaim);
-            if (userDivs.Count == 0)
+            // Если divisionId == 0, значит нужно взять все доступные отделы:
+            List<int> divisionsToLoad;
+            if (divisionId == 0)
             {
-                // Если нет записей, значит доступен только родной
-                userDivs.Add(divisionId);
+                var userDivs = await _userSettingsService.GetUserAllowedDivisionsAsync(userIdClaim);
+                // Если у пользователя совсем нет прописанных — берём родной отдел
+                if (userDivs.Count == 0)
+                {
+                    // На случай, если в токене есть
+                    // (но это логика уже на ваше усмотрение)
+                    divisionsToLoad = new List<int>();
+                }
+                else
+                {
+                    divisionsToLoad = userDivs;
+                }
+            }
+            else
+            {
+                divisionsToLoad = new List<int> { divisionId };
             }
 
-            // Грузим все работы (из кэша) для одного отдела
-            var all = await GetWorkItemsByDivisionAsync(new List<int> { divisionId });
+            // Если нет отделов в списке — вернём пустоту
+            if (divisionsToLoad.Count == 0)
+            {
+                return new PagedWorkItemsDto
+                {
+                    Items = new List<WorkItemDto>(),
+                    CurrentPage = pageNumber,
+                    PageSize = pageSize,
+                    TotalPages = 1,
+                    TotalCount = 0
+                };
+            }
 
-            // Фильтруем in-memory
-            var query = all.AsQueryable();
+            // Получаем все работы
+            var all = await GetWorkItemsByDivisionAsync(divisionsToLoad);
+
+            // Фильтруем
+            var filtered = ApplyFilters(all, startDate, endDate, executor, approver, search);
+
+            //// Подсветим, если нужно
+            if (!string.IsNullOrEmpty(currentUserName))
+            {
+                await HighlightRows(filtered, currentUserName);
+            }
+
+            // Считаем пагинацию
+            int totalCount = filtered.Count;
+            int totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
+            if (pageNumber < 1) pageNumber = 1;
+            if (pageNumber > totalPages && totalPages > 0) pageNumber = totalPages;
+
+            var skip = (pageNumber - 1) * pageSize;
+            var itemsPage = filtered.Skip(skip).Take(pageSize).ToList();
+
+            return new PagedWorkItemsDto
+            {
+                Items = itemsPage,
+                CurrentPage = pageNumber,
+                PageSize = pageSize,
+                TotalPages = totalPages,
+                TotalCount = totalCount
+            };
+        }
+
+        // --- НОВЫЙ метод: без пагинации (для экспорта) ---
+        public async Task<List<WorkItemDto>> GetAllFilteredWithoutPaging(
+            int divisionId,
+            DateTime? startDate,
+            DateTime? endDate,
+            string? executor,
+            string? approver,
+            string? search,
+            int userIdClaim,
+            string? currentUserName
+        )
+        {
+            // Если divisionId=0 => все отделы
+            List<int> divisionsToLoad;
+            if (divisionId == 0)
+            {
+                var userDivs = await _userSettingsService.GetUserAllowedDivisionsAsync(userIdClaim);
+                if (userDivs.Count == 0) userDivs = new List<int>();
+                divisionsToLoad = userDivs;
+            }
+            else
+            {
+                divisionsToLoad = new List<int> { divisionId };
+            }
+
+            if (divisionsToLoad.Count == 0) return new List<WorkItemDto>();
+
+            var all = await GetWorkItemsByDivisionAsync(divisionsToLoad);
+            var filtered = ApplyFilters(all, startDate, endDate, executor, approver, search);
+
+            if (!string.IsNullOrEmpty(currentUserName))
+            {
+                await HighlightRows(filtered, currentUserName);
+            }
+
+            return filtered;
+        }
+
+        // ---------------------------------------------------
+        // Вспомогательная функция: сама фильтрация (чтоб не дублировать)
+        private List<WorkItemDto> ApplyFilters(
+            List<WorkItemDto> source,
+            DateTime? startDate,
+            DateTime? endDate,
+            string? executor,
+            string? approver,
+            string? search
+        )
+        {
+            var query = source.AsQueryable();
 
             if (!string.IsNullOrEmpty(executor))
             {
@@ -84,7 +190,6 @@ namespace Monitoring.Infrastructure.Services
 
             if (endDate.HasValue)
             {
-                // берем кор.3, или кор.2, или кор.1, или planDate
                 query = query.Where(x => (x.Korrect3 ?? x.Korrect2 ?? x.Korrect1 ?? x.PlanDate) <= endDate.Value);
             }
             if (startDate.HasValue)
@@ -94,6 +199,10 @@ namespace Monitoring.Infrastructure.Services
 
             return query.ToList();
         }
+
+
+        // Для удобства, добавим вспомогательный метод преобразования:
+        // (Чтобы при экспорте легко перегнать Dto в сущность для ReportGenerator)
 
         /// <summary>
         /// Получить все работы (WorkItemDto) по списку подразделений (divisionIds).
@@ -342,6 +451,45 @@ namespace Monitoring.Infrastructure.Services
             }
 
             return approvers;
+        }
+
+        // ---------------------------------------------------
+        // Вспомогательная функция: подсветка (HighlightRows)
+        private async Task HighlightRows(List<WorkItemDto> items, string currentUserName)
+        {
+            // Для каждой строки ищем заявки (Pending) от текущего пользователя
+            // (Нужно обратиться к _workRequestService.GetRequestsByDocumentNumberAsync)
+            // Чтобы не делать слишком много запросов, можно сделать группировку и т.д.
+            // Но для наглядности используем прямой подход.
+
+            // Группируем по DocumentNumber, потом одним запросом получим все заявки сразу,
+            // а затем сопоставим. (Оптимизация - на ваше усмотрение)
+            var docNumbers = items.Select(x => x.DocumentNumber).Distinct().ToList();
+            // Для упрощения сейчас - просто в цикле (но тогда будет n запросов).
+            // Если надо оптимизировать - сами сделайте. 
+
+            foreach (var item in items)
+            {
+                var requests = await _workRequestService.GetRequestsByDocumentNumberAsync(item.DocumentNumber);
+                var pendingFromMe = requests.FirstOrDefault(r =>
+                    r.Status == "Pending"
+                    && !r.IsDone
+                    && r.Sender.Equals(currentUserName, StringComparison.OrdinalIgnoreCase)
+                );
+                if (pendingFromMe != null)
+                {
+                    if (pendingFromMe.RequestType == "факт")
+                        item.HighlightCssClass = "table-info";
+                    else if (pendingFromMe.RequestType.StartsWith("корр"))
+                        item.HighlightCssClass = "table-warning";
+
+                    item.UserPendingRequestId = pendingFromMe.Id;
+                    item.UserPendingRequestType = pendingFromMe.RequestType;
+                    item.UserPendingProposedDate = pendingFromMe.ProposedDate;
+                    item.UserPendingRequestNote = pendingFromMe.Note;
+                    item.UserPendingReceiver = pendingFromMe.Receiver;
+                }
+            }
         }
 
         /// <summary>

@@ -9,12 +9,13 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Monitoring.Application.Services;
+using Monitoring.Domain.Entities;
 
 namespace Monitoring.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // Требуем наличие JWT (Bearer-token) для всех методов (кроме AllowAnonymous)
+    [Authorize] // Требуем наличие JWT (Bearer-token)
     public class WorkItemsController : ControllerBase
     {
         private readonly IWorkItemAppService _workItemAppService;
@@ -32,14 +33,18 @@ namespace Monitoring.Api.Controllers
             _workRequestService = workRequestService;
         }
 
+        // --- (НОВЫЙ вариант: возвращаем PagedWorkItemsDto, а не просто List<WorkItemDto>) ---
+        // Добавлены параметры pageNumber, pageSize.
         [HttpGet]
-        public async Task<ActionResult<List<WorkItemDto>>> GetFilteredWorkItems(
+        public async Task<ActionResult<PagedWorkItemsDto>> GetFilteredWorkItems(
             [FromQuery] DateTime? startDate,
             [FromQuery] DateTime? endDate,
             [FromQuery] string? executor,
             [FromQuery] string? approver,
             [FromQuery] string? search,
-            [FromQuery] int? divisionId
+            [FromQuery] int? divisionId,
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 50
         )
         {
             var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
@@ -57,57 +62,23 @@ namespace Monitoring.Api.Controllers
             var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
             if (string.IsNullOrEmpty(divIdClaim))
                 return Forbid("Нет divisionId в токене");
-
             int homeDivId = int.Parse(divIdClaim);
 
-            int realDivId = divisionId ?? homeDivId;
-
-            if (!startDate.HasValue)
-                startDate = new DateTime(2014, 1, 1);
-
-            if (!endDate.HasValue)
-            {
-                var now = DateTime.Now;
-                endDate = new DateTime(now.Year, now.Month, 1).AddMonths(1).AddDays(-1);
-            }
-
-            // 1) Получаем отфильтрованные WorkItems
-            var workItems = await _workItemAppService.GetFilteredWorkItemsAsync(
-                realDivId, startDate, endDate, executor, approver, search, userId
+            // Вызываем метод сервиса, который вернёт пагинированный результат.
+            var pagedResult = await _workItemAppService.GetFilteredWorkItemsAsync(
+                divisionId ?? homeDivId,
+                startDate,
+                endDate,
+                executor,
+                approver,
+                search,
+                userId,
+                pageNumber,
+                pageSize,
+                userName // Передадим userName, чтоб внутри подсветить нужные строки.
             );
 
-            // 2) "Подсвечиваем" строки, как было в Razor
-            //    Для каждой строки смотрим, есть ли "Pending"-заявка от текущего пользователя
-            foreach (var item in workItems)
-            {
-                // Ищем все заявки по DocumentNumber
-                var requests = await _workRequestService.GetRequestsByDocumentNumberAsync(item.DocumentNumber);
-
-                // PENDING от текущего пользователя (Sender == userName)
-                var pendingFromMe = requests.FirstOrDefault(r =>
-                    r.Status == "Pending"
-                    && !r.IsDone
-                    && r.Sender.Equals(userName, StringComparison.OrdinalIgnoreCase)
-                );
-
-                if (pendingFromMe != null)
-                {
-                    // ставим CSS-класс
-                    if (pendingFromMe.RequestType == "факт")
-                        item.HighlightCssClass = "table-info";
-                    else if (pendingFromMe.RequestType.StartsWith("корр"))
-                        item.HighlightCssClass = "table-warning";
-
-                    // заполняем дополнительные поля
-                    item.UserPendingRequestId = pendingFromMe.Id;
-                    item.UserPendingRequestType = pendingFromMe.RequestType;
-                    item.UserPendingProposedDate = pendingFromMe.ProposedDate;
-                    item.UserPendingRequestNote = pendingFromMe.Note;
-                    item.UserPendingReceiver = pendingFromMe.Receiver;
-                }
-            }
-
-            return Ok(workItems);
+            return Ok(pagedResult);
         }
 
         [HttpGet("AllowedDivisions")]
@@ -127,6 +98,16 @@ namespace Monitoring.Api.Controllers
                     int homeDiv = int.Parse(divIdClaim);
                     if (!divisions.Contains(homeDiv))
                         divisions.Add(homeDiv);
+                }
+
+                // Можно добавить логику: если хотим всегда иметь в списке "0" => "Все подразделения",
+                // то возвращаем "0" вручную. Но можно и на фронтенде вставить <option value="0">...
+                // Решим на уровне фронта. 
+                // Или можно сделать так:
+                if (!divisions.Contains(0))
+                {
+                    // Условно добавим "0" для "Все подразделения"
+                    divisions.Insert(0, 0);
                 }
 
                 return Ok(divisions);
@@ -165,10 +146,6 @@ namespace Monitoring.Api.Controllers
             }
         }
 
-        /// <summary>
-        /// НОВЫЙ метод: Возвращает строку с названием отдела.
-        /// GET /api/WorkItems/DivisionName?divisionId=XX
-        /// </summary>
         [HttpGet("DivisionName")]
         public async Task<ActionResult<string>> GetDivisionName([FromQuery] int divisionId)
         {
@@ -190,15 +167,11 @@ namespace Monitoring.Api.Controllers
             return Ok(new { success = true });
         }
 
-        // ----------------------------------------------------------------
-        //  НОВЫЙ Метод "Export", аналог Razor OnPostAsync() из IndexModel
-        // ----------------------------------------------------------------
         [HttpPost("Export")]
         public async Task<IActionResult> Export([FromBody] ExportRequestDto request)
         {
             try
             {
-                // 1) Проверяем JWT
                 var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
                 var userName = User.Identity?.Name;
                 var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
@@ -211,52 +184,46 @@ namespace Monitoring.Api.Controllers
                 int userId = int.Parse(userIdClaim);
                 int homeDivisionId = int.Parse(divIdClaim);
 
-                // 2) Определяем реальный отдел
                 int actualDivisionId = request.DivisionId ?? homeDivisionId;
 
-                // 3) Подгружаем список работ с учётом фильтров
                 var startDate = request.StartDate ?? new DateTime(2014, 1, 1);
                 var endDate = request.EndDate ?? DateTime.Now;
 
-                var workItems = await _workItemAppService.GetFilteredWorkItemsAsync(
+                // Здесь нам не нужна постраничность, т.к. выгружаем целиком.
+                // Поэтому берём все записи (можно передать pageNumber=1, pageSize=999999 или сделать отдельный метод).
+                // Допустим, создадим вспомогательный метод в сервисе, который вернёт всё без пагинации:
+                var workItems = await _workItemAppService.GetAllFilteredWithoutPaging(
                     actualDivisionId,
                     startDate,
                     endDate,
                     request.Executor,
                     request.Approver,
                     request.Search,
-                    userId
+                    userId,
+                    userName
                 );
 
-                // 4) Узнаем "название" подразделения
+                // Узнаем "название" подразделения
                 string depName = await _workItemAppService.GetDevNameAsync(actualDivisionId);
 
-                // 5) Если в запросе переданы выбранные позиции (SelectedItems), фильтруем и/или упорядочиваем
+                // Фильтруем выбранные
                 var selectedDocs = request.SelectedItems ?? new List<string>();
                 if (selectedDocs.Count > 0)
                 {
-                    // 5.1) Оставляем только те, что в списке selectedDocs (если они есть в workItems)
-                    // 5.2) Сортируем в порядке selectedDocs
                     var filtered = workItems
                         .Where(w => selectedDocs.Contains(w.DocumentNumber))
                         .OrderBy(w => selectedDocs.IndexOf(w.DocumentNumber))
                         .ToList();
                     workItems = filtered;
                 }
-                else
-                {
-                    // Если ничего не выбрано - берём все (как в Razor)
-                    // Можно оставить как есть, workItems уже загружены
-                }
 
-                // 6) Генерируем нужный тип отчёта
+
                 string format = request.Format?.ToLower() ?? "pdf";
-
                 if (format == "pdf")
                 {
                     var pdfBytes = ReportGenerator.GeneratePdf(
-                        // конвертируем WorkItemDto -> WorkItem (т.к. методы ReportGenerator* используют старый тип),
-                        // но у нас, по сути, поля те же. Можно написать маппер вручную:
+                    // конвертируем WorkItemDto -> WorkItem (т.к. методы ReportGenerator* используют старый тип),
+                    // но у нас, по сути, поля те же. Можно написать маппер вручную:
                         workItems.Select(x => new Domain.Entities.WorkItem
                         {
                             DocumentNumber = x.DocumentNumber,
@@ -274,7 +241,6 @@ namespace Monitoring.Api.Controllers
                         $"Сдаточный чек от {DateTime.Now:dd.MM.yyyy}",
                         depName
                     );
-
                     return File(pdfBytes, "application/pdf", $"Check_{DateTime.Now:yyyyMMdd}.pdf");
                 }
                 else if (format == "excel")
@@ -331,7 +297,6 @@ namespace Monitoring.Api.Controllers
                 }
                 else
                 {
-                    // Если формат неизвестен, просто вернём BadRequest
                     return BadRequest("Неизвестный формат экспорта.");
                 }
             }
