@@ -33,8 +33,10 @@ namespace Monitoring.Api.Controllers
             _workRequestService = workRequestService;
         }
 
-        // --- (НОВЫЙ вариант: возвращаем PagedWorkItemsDto, а не просто List<WorkItemDto>) ---
-        // Добавлены параметры pageNumber, pageSize.
+        /// <summary>
+        /// Получить постранично отфильтрованные WorkItems. 
+        /// ВСЕГДА возвращаем структуру PagedWorkItemsDto (items, currentPage, totalPages и т.д.).
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<PagedWorkItemsDto>> GetFilteredWorkItems(
             [FromQuery] DateTime? startDate,
@@ -53,12 +55,12 @@ namespace Monitoring.Api.Controllers
 
             int userId = int.Parse(userIdClaim);
 
-            // Ищем userName
-            var userName = User.Identity?.Name; // частая практика
+            // Имя пользователя (smallName или логин) - как определено при выдаче токена
+            var userName = User.Identity?.Name;
             if (string.IsNullOrEmpty(userName))
                 return Forbid("Нет userName");
 
-            // Родной отдел (если divisionId не передали)
+            // &laquo;Домашний&raquo; отдел (из токена). Он показывается как &laquo;родной&raquo; для пользователя.
             var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
             if (string.IsNullOrEmpty(divIdClaim))
                 return Forbid("Нет divisionId в токене");
@@ -66,7 +68,7 @@ namespace Monitoring.Api.Controllers
 
             // Вызываем метод сервиса, который вернёт пагинированный результат.
             var pagedResult = await _workItemAppService.GetFilteredWorkItemsAsync(
-                divisionId ?? homeDivId,
+                divisionId ?? homeDivId,  // <-- Если divisionId не указан, берём домашний
                 startDate,
                 endDate,
                 executor,
@@ -75,12 +77,15 @@ namespace Monitoring.Api.Controllers
                 userId,
                 pageNumber,
                 pageSize,
-                userName // Передадим userName, чтоб внутри подсветить нужные строки.
+                userName // Передадим userName, чтобы внутри подсветить нужные строки
             );
 
             return Ok(pagedResult);
         }
 
+        /// <summary>
+        /// Список айдишников отделов, доступных текущему пользователю.
+        /// </summary>
         [HttpGet("AllowedDivisions")]
         public async Task<ActionResult<List<int>>> GetAllowedDivisions()
         {
@@ -92,6 +97,7 @@ namespace Monitoring.Api.Controllers
 
                 var divisions = await _userSettingsService.GetUserAllowedDivisionsAsync(userId);
 
+                // Вытаскиваем из токена домашний отдел тоже, если его нет в списке — добавим.
                 var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
                 if (!string.IsNullOrEmpty(divIdClaim))
                 {
@@ -100,15 +106,10 @@ namespace Monitoring.Api.Controllers
                         divisions.Add(homeDiv);
                 }
 
-                // Можно добавить логику: если хотим всегда иметь в списке "0" => "Все подразделения",
-                // то возвращаем "0" вручную. Но можно и на фронтенде вставить <option value="0">...
-                // Решим на уровне фронта. 
-                // Или можно сделать так:
+                // Часто нужно иметь "0" => "Все подразделения"
+                // Можно вставить "0" в начало.
                 if (!divisions.Contains(0))
-                {
-                    // Условно добавим "0" для "Все подразделения"
                     divisions.Insert(0, 0);
-                }
 
                 return Ok(divisions);
             }
@@ -118,6 +119,10 @@ namespace Monitoring.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Список исполнителей в рамках divisionId (если 0 - можно вернуть всех или пусто, 
+        /// но по задаче теперь не блокируем).
+        /// </summary>
         [HttpGet("Executors")]
         public async Task<ActionResult<List<string>>> GetExecutors([FromQuery] int divisionId)
         {
@@ -132,6 +137,10 @@ namespace Monitoring.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Список принимающих в рамках divisionId (если 0 - можно вернуть всех, 
+        /// по аналогии с Razor Pages).
+        /// </summary>
         [HttpGet("Approvers")]
         public async Task<ActionResult<List<string>>> GetApprovers([FromQuery] int divisionId)
         {
@@ -146,6 +155,9 @@ namespace Monitoring.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Получить название подразделения по ID
+        /// </summary>
         [HttpGet("DivisionName")]
         public async Task<ActionResult<string>> GetDivisionName([FromQuery] int divisionId)
         {
@@ -160,6 +172,9 @@ namespace Monitoring.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Очистить кэш (по конкретному divisionId).
+        /// </summary>
         [HttpPost("ClearCache")]
         public ActionResult ClearCache([FromQuery] int divisionId)
         {
@@ -167,16 +182,23 @@ namespace Monitoring.Api.Controllers
             return Ok(new { success = true });
         }
 
+        /// <summary>
+        /// Экспорт в PDF/Excel/Word. 
+        /// Если список SelectedItems пуст, выгружаем все (по фильтрам, но без пагинации). 
+        /// </summary>
         [HttpPost("Export")]
         public async Task<IActionResult> Export([FromBody] ExportRequestDto request)
         {
             try
             {
+                // Берём userId, userName, homeDivisionId из токена
                 var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
                 var userName = User.Identity?.Name;
                 var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
 
-                if (string.IsNullOrEmpty(userIdClaim) || string.IsNullOrEmpty(userName) || string.IsNullOrEmpty(divIdClaim))
+                if (string.IsNullOrEmpty(userIdClaim) ||
+                    string.IsNullOrEmpty(userName) ||
+                    string.IsNullOrEmpty(divIdClaim))
                 {
                     return Forbid("Нет необходимых данных в токене (userId, userName, divisionId).");
                 }
@@ -189,9 +211,7 @@ namespace Monitoring.Api.Controllers
                 var startDate = request.StartDate ?? new DateTime(2014, 1, 1);
                 var endDate = request.EndDate ?? DateTime.Now;
 
-                // Здесь нам не нужна постраничность, т.к. выгружаем целиком.
-                // Поэтому берём все записи (можно передать pageNumber=1, pageSize=999999 или сделать отдельный метод).
-                // Допустим, создадим вспомогательный метод в сервисе, который вернёт всё без пагинации:
+                // Берём все работы без пагинации
                 var workItems = await _workItemAppService.GetAllFilteredWithoutPaging(
                     actualDivisionId,
                     startDate,
@@ -206,38 +226,41 @@ namespace Monitoring.Api.Controllers
                 // Узнаем "название" подразделения
                 string depName = await _workItemAppService.GetDevNameAsync(actualDivisionId);
 
-                // Фильтруем выбранные
+                // Если пользователь выбрал конкретные строки, то отфильтруем
                 var selectedDocs = request.SelectedItems ?? new List<string>();
                 if (selectedDocs.Count > 0)
                 {
-                    var filtered = workItems
+                    // Сохраняем порядок в соответствии с индексом в selectedDocs
+                    workItems = workItems
                         .Where(w => selectedDocs.Contains(w.DocumentNumber))
                         .OrderBy(w => selectedDocs.IndexOf(w.DocumentNumber))
                         .ToList();
-                    workItems = filtered;
                 }
+                // Если список пуст => экспортируем всё (так по условию)
 
-
+                // Готовим формат
                 string format = request.Format?.ToLower() ?? "pdf";
+
+                // Маппим WorkItemDto -> WorkItem для ReportGenerator (как раньше в Razor)
+                var itemsForReport = workItems.Select(x => new Domain.Entities.WorkItem
+                {
+                    DocumentNumber = x.DocumentNumber,
+                    DocumentName = x.DocumentName,
+                    WorkName = x.WorkName,
+                    Executor = x.Executor,
+                    Controller = x.Controller,
+                    Approver = x.Approver,
+                    PlanDate = x.PlanDate == null ? (DateTime?)null : x.PlanDate,
+                    Korrect1 = x.Korrect1 == null ? (DateTime?)null : x.Korrect1,
+                    Korrect2 = x.Korrect2 == null ? (DateTime?)null : x.Korrect2,
+                    Korrect3 = x.Korrect3 == null ? (DateTime?)null : x.Korrect3,
+                    FactDate = x.FactDate == null ? (DateTime?)null : x.FactDate
+                }).ToList();
+
                 if (format == "pdf")
                 {
                     var pdfBytes = ReportGenerator.GeneratePdf(
-                    // конвертируем WorkItemDto -> WorkItem (т.к. методы ReportGenerator* используют старый тип),
-                    // но у нас, по сути, поля те же. Можно написать маппер вручную:
-                        workItems.Select(x => new Domain.Entities.WorkItem
-                        {
-                            DocumentNumber = x.DocumentNumber,
-                            DocumentName = x.DocumentName,
-                            WorkName = x.WorkName,
-                            Executor = x.Executor,
-                            Controller = x.Controller,
-                            Approver = x.Approver,
-                            PlanDate = x.PlanDate == null ? (DateTime?)null : x.PlanDate,
-                            Korrect1 = x.Korrect1 == null ? (DateTime?)null : x.Korrect1,
-                            Korrect2 = x.Korrect2 == null ? (DateTime?)null : x.Korrect2,
-                            Korrect3 = x.Korrect3 == null ? (DateTime?)null : x.Korrect3,
-                            FactDate = x.FactDate == null ? (DateTime?)null : x.FactDate
-                        }).ToList(),
+                        itemsForReport,
                         $"Сдаточный чек от {DateTime.Now:dd.MM.yyyy}",
                         depName
                     );
@@ -246,20 +269,7 @@ namespace Monitoring.Api.Controllers
                 else if (format == "excel")
                 {
                     var excelBytes = ReportGeneratorExcel.GenerateExcel(
-                        workItems.Select(x => new Domain.Entities.WorkItem
-                        {
-                            DocumentNumber = x.DocumentNumber,
-                            DocumentName = x.DocumentName,
-                            WorkName = x.WorkName,
-                            Executor = x.Executor,
-                            Controller = x.Controller,
-                            Approver = x.Approver,
-                            PlanDate = x.PlanDate == null ? (DateTime?)null : x.PlanDate,
-                            Korrect1 = x.Korrect1 == null ? (DateTime?)null : x.Korrect1,
-                            Korrect2 = x.Korrect2 == null ? (DateTime?)null : x.Korrect2,
-                            Korrect3 = x.Korrect3 == null ? (DateTime?)null : x.Korrect3,
-                            FactDate = x.FactDate == null ? (DateTime?)null : x.FactDate
-                        }).ToList(),
+                        itemsForReport,
                         $"Сдаточный чек от {DateTime.Now:dd.MM.yyyy}",
                         depName
                     );
@@ -272,20 +282,7 @@ namespace Monitoring.Api.Controllers
                 else if (format == "word")
                 {
                     var docBytes = ReportGeneratorWord.GenerateWord(
-                        workItems.Select(x => new Domain.Entities.WorkItem
-                        {
-                            DocumentNumber = x.DocumentNumber,
-                            DocumentName = x.DocumentName,
-                            WorkName = x.WorkName,
-                            Executor = x.Executor,
-                            Controller = x.Controller,
-                            Approver = x.Approver,
-                            PlanDate = x.PlanDate == null ? (DateTime?)null : x.PlanDate,
-                            Korrect1 = x.Korrect1 == null ? (DateTime?)null : x.Korrect1,
-                            Korrect2 = x.Korrect2 == null ? (DateTime?)null : x.Korrect2,
-                            Korrect3 = x.Korrect3 == null ? (DateTime?)null : x.Korrect3,
-                            FactDate = x.FactDate == null ? (DateTime?)null : x.FactDate
-                        }).ToList(),
+                        itemsForReport,
                         $"Сдаточный чек от {DateTime.Now:dd.MM.yyyy}",
                         depName
                     );
