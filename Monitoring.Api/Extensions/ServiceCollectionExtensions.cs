@@ -10,6 +10,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System;
 using System.Text;
+using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 
 namespace Monitoring.Api.Extensions
 {
@@ -96,6 +97,7 @@ namespace Monitoring.Api.Extensions
             services.AddScoped<IWorkItemAppService, WorkItemAppService>();
             services.AddScoped<IWorkRequestService, WorkRequestAppService>();
             services.AddScoped<INotificationService, NotificationService>();
+            services.AddScoped<IPerformanceService, PerformanceService>();
 
             return services;
         }
