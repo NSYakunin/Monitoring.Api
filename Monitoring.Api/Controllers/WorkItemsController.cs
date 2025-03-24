@@ -60,7 +60,7 @@ namespace Monitoring.Api.Controllers
             if (string.IsNullOrEmpty(userName))
                 return Forbid("Нет userName");
 
-            // &laquo;Домашний&raquo; отдел (из токена). Он показывается как &laquo;родной&raquo; для пользователя.
+            // Домашний отдел (из токена). Он показывается как родной для пользователя.
             var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
             if (string.IsNullOrEmpty(divIdClaim))
                 return Forbid("Нет divisionId в токене");

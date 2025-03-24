@@ -39,7 +39,7 @@ namespace Monitoring.Infrastructure.Services
         }
 
         /// <summary>
-        /// Основной метод: получить постранично отфильтрованный список WorkItemsDto.
+        /// Основной метод: получаем постранично отфильтрованный список WorkItemsDto.
         /// </summary>
         public async Task<PagedWorkItemsDto> GetFilteredWorkItemsAsync(
             int divisionId,
@@ -54,7 +54,7 @@ namespace Monitoring.Infrastructure.Services
             string? currentUserName
         )
         {
-            // Если divisionId == 0, значит &laquo;Все подразделения&raquo;, 
+            // Если divisionId == 0, значит все подразделения, 
             // определим все, доступные пользователю
             List<int> divisionsToLoad;
             if (divisionId == 0)
@@ -174,13 +174,13 @@ namespace Monitoring.Infrastructure.Services
                 allItems.AddRange(itemsForDiv);
             }
 
-            // Теперь &laquo;агрегируем&raquo; дубликаты: если одна и та же работа, 
+            // Теперь агрегируем дубликаты: если одна и та же работа, 
             // то складываем исполнителей, контролирующих и т.д.
             var dict = new Dictionary<string, WorkItemDto>();
 
             foreach (var w in allItems)
             {
-                // Ключ, чтобы распознать &laquo;ту же запись&raquo;
+                // Ключ, чтобы распознать ту же запись
                 // используем основные поля
                 string key = $"{w.DocumentName}|{w.WorkName}|{w.Approver}|{w.PlanDate}|{w.Korrect1}|{w.Korrect2}|{w.Korrect3}|{w.FactDate}|{w.DocumentNumber}";
 
