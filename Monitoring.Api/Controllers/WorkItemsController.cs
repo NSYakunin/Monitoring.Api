@@ -2,14 +2,13 @@
 using Microsoft.AspNetCore.Mvc;
 using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
-using Monitoring.Infrastructure.Services;
 using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Monitoring.Application.Services;
-using Monitoring.Domain.Entities;
+using Monitoring.Infrastructure.Services;
 
 namespace Monitoring.Api.Controllers
 {
@@ -55,18 +54,16 @@ namespace Monitoring.Api.Controllers
 
             int userId = int.Parse(userIdClaim);
 
-            // Имя пользователя (smallName или логин) - как определено при выдаче токена
             var userName = User.Identity?.Name;
             if (string.IsNullOrEmpty(userName))
                 return Forbid("Нет userName");
 
-            // Домашний отдел (из токена). Он показывается как родной для пользователя.
             var divIdClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
             if (string.IsNullOrEmpty(divIdClaim))
                 return Forbid("Нет divisionId в токене");
             int homeDivId = int.Parse(divIdClaim);
 
-            // Вызываем метод сервиса, который вернёт пагинированный результат.
+            // Вызываем метод сервиса, который вернёт пагинированный результат
             var pagedResult = await _workItemAppService.GetFilteredWorkItemsAsync(
                 divisionId ?? homeDivId,  // <-- Если divisionId не указан, берём домашний
                 startDate,
@@ -77,7 +74,7 @@ namespace Monitoring.Api.Controllers
                 userId,
                 pageNumber,
                 pageSize,
-                userName // Передадим userName, чтобы внутри подсветить нужные строки
+                userName
             );
 
             return Ok(pagedResult);
@@ -107,7 +104,6 @@ namespace Monitoring.Api.Controllers
                 }
 
                 // Часто нужно иметь "0" => "Все подразделения"
-                // Можно вставить "0" в начало.
                 if (!divisions.Contains(0))
                     divisions.Insert(0, 0);
 
@@ -230,18 +226,16 @@ namespace Monitoring.Api.Controllers
                 var selectedDocs = request.SelectedItems ?? new List<string>();
                 if (selectedDocs.Count > 0)
                 {
-                    // Сохраняем порядок в соответствии с индексом в selectedDocs
                     workItems = workItems
                         .Where(w => selectedDocs.Contains(w.DocumentNumber))
                         .OrderBy(w => selectedDocs.IndexOf(w.DocumentNumber))
                         .ToList();
                 }
-                // Если список пуст => экспортируем всё (так по условию)
 
                 // Готовим формат
                 string format = request.Format?.ToLower() ?? "pdf";
 
-                // Маппим WorkItemDto -> WorkItem для ReportGenerator (как раньше в Razor)
+                // Маппим WorkItemDto -> WorkItem для ReportGenerator
                 var itemsForReport = workItems.Select(x => new Domain.Entities.WorkItem
                 {
                     DocumentNumber = x.DocumentNumber,
@@ -250,11 +244,11 @@ namespace Monitoring.Api.Controllers
                     Executor = x.Executor,
                     Controller = x.Controller,
                     Approver = x.Approver,
-                    PlanDate = x.PlanDate == null ? (DateTime?)null : x.PlanDate,
-                    Korrect1 = x.Korrect1 == null ? (DateTime?)null : x.Korrect1,
-                    Korrect2 = x.Korrect2 == null ? (DateTime?)null : x.Korrect2,
-                    Korrect3 = x.Korrect3 == null ? (DateTime?)null : x.Korrect3,
-                    FactDate = x.FactDate == null ? (DateTime?)null : x.FactDate
+                    PlanDate = x.PlanDate,
+                    Korrect1 = x.Korrect1,
+                    Korrect2 = x.Korrect2,
+                    Korrect3 = x.Korrect3,
+                    FactDate = x.FactDate
                 }).ToList();
 
                 if (format == "pdf")

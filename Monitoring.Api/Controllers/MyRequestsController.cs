@@ -1,8 +1,6 @@
-﻿// Monitoring.Api.Controllers.MyRequestsController
-
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Monitoring.Application.DTO; // для CreateRequestDto, UpdateRequestDto, DeleteRequestDto
+using Monitoring.Application.DTO;
 using Monitoring.Application.Interfaces;
 using Monitoring.Domain.Entities;
 using System.Linq;
@@ -44,7 +42,6 @@ namespace Monitoring.Api.Controllers
         [HttpGet]
         public async Task<ActionResult<List<WorkRequest>>> GetMyRequests()
         {
-            // userName и userId
             var userName = User.Identity?.Name;
             if (string.IsNullOrEmpty(userName))
                 return Forbid("Нет userName");
@@ -54,7 +51,6 @@ namespace Monitoring.Api.Controllers
                 return Forbid("Нет userId");
             int userId = int.Parse(userIdClaim);
 
-            // Проверяем, что у пользователя есть право на закрытие работ
             bool canClose = await _userSettingsService.HasAccessToCloseWorkAsync(userId);
             if (!canClose)
                 return Forbid("У вас нет права закрывать работы");
@@ -66,29 +62,15 @@ namespace Monitoring.Api.Controllers
         /// <summary>
         /// POST /api/MyRequests/Create
         /// Создание новой заявки.
-        /// Логика аналогична OnPostCreateRequestAsync в Razor.
         /// </summary>
         [HttpPost("Create")]
         public async Task<ActionResult> Create([FromBody] CreateRequestDto dto)
         {
             try
             {
-                // userName
                 var userName = User.Identity?.Name;
                 if (string.IsNullOrEmpty(userName))
                     return Forbid("Нет userName");
-
-                // Нужно проверить, что текущий пользователь действительно исполнитель (sender)
-                // Найдём WorkItem по docNumber
-                // Здесь можно заодно узнать, к какому division принадлежит документ.
-
-                // Для упрощения предположим, что docNumber уникален в БД.
-                // Ищем среди всех видимых пользователю отделов? Или берём "из любого"?
-                // Опять же, как у вас устроено - варьируется.
-
-                // Тут возьмём divisionId из jwt, 
-                // или можно взять все отделы, к которым у юзера доступ, 
-                // и поискать документ.
 
                 var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdClaim))
@@ -98,7 +80,6 @@ namespace Monitoring.Api.Controllers
                 var divisions = await _userSettingsService.GetUserAllowedDivisionsAsync(userId);
                 if (divisions.Count == 0)
                 {
-                    // Если почему-то ничего не найдено, добавим домашний
                     var homeDivClaim = User.Claims.FirstOrDefault(c => c.Type == "divisionId")?.Value;
                     if (!string.IsNullOrEmpty(homeDivClaim))
                     {
@@ -107,14 +88,12 @@ namespace Monitoring.Api.Controllers
                 }
 
                 var allWorkItems = await _workItemAppService.GetWorkItemsByDivisionAsync(divisions);
-
                 var witem = allWorkItems.FirstOrDefault(x => x.DocumentNumber == dto.DocumentNumber);
                 if (witem == null)
                 {
                     return BadRequest(new { success = false, message = "WorkItem не найден" });
                 }
 
-                // проверяем, что currentUserName входит в список исполнителей
                 var execs = witem.Executor
                     .Split(',', StringSplitOptions.RemoveEmptyEntries)
                     .Select(e => e.Trim())
@@ -129,7 +108,6 @@ namespace Monitoring.Api.Controllers
                     });
                 }
 
-                // Создаём новую заявку
                 var newRequest = new WorkRequest
                 {
                     WorkDocumentNumber = witem.DocumentNumber,
@@ -152,7 +130,6 @@ namespace Monitoring.Api.Controllers
                 };
 
                 int newId = await _workRequestService.CreateRequestAsync(newRequest);
-
                 return Ok(new { success = true, requestId = newId });
             }
             catch (Exception ex)
@@ -174,25 +151,21 @@ namespace Monitoring.Api.Controllers
                 if (string.IsNullOrEmpty(userName))
                     return Forbid("Нет userName");
 
-                // 1) Ищем заявку
                 var requests = await _workRequestService.GetRequestsByDocumentNumberAsync(dto.DocumentNumber);
                 var req = requests.FirstOrDefault(r => r.Id == dto.Id);
                 if (req == null)
                     return BadRequest(new { success = false, message = "Заявка не найдена" });
 
-                // 2) Проверяем, что Sender == currentUser
                 if (!req.Sender.Equals(userName, StringComparison.OrdinalIgnoreCase))
                 {
                     return BadRequest(new { success = false, message = "Вы не автор заявки" });
                 }
 
-                // 3) Проверяем, что она Pending
                 if (req.Status != "Pending")
                 {
                     return BadRequest(new { success = false, message = "Заявка уже обработана" });
                 }
 
-                // 4) Обновляем
                 req.RequestType = dto.RequestType;
                 req.Receiver = dto.Receiver;
                 req.ProposedDate = dto.ProposedDate;
@@ -244,7 +217,6 @@ namespace Monitoring.Api.Controllers
 
         /// <summary>
         /// POST /api/MyRequests/SetRequestStatus
-        /// (То же самое, что раньше SetRequestStatusAsync в Razor.)
         /// Принять/Отклонить заявку.
         /// </summary>
         [HttpPost("SetRequestStatus")]
@@ -261,7 +233,6 @@ namespace Monitoring.Api.Controllers
                 if (req == null)
                     return BadRequest(new { success = false, message = "Заявка не найдена" });
 
-                // Receiver == currentUser?
                 if (!req.Receiver.Equals(userName, StringComparison.OrdinalIgnoreCase))
                 {
                     return BadRequest(new { success = false, message = "У вас нет прав на изменение этой заявки" });

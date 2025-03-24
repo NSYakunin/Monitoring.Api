@@ -11,6 +11,7 @@ using Microsoft.OpenApi.Models;
 using System;
 using System.Text;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
+using Monitoring.Infrastructure.Repositories;
 
 namespace Monitoring.Api.Extensions
 {
@@ -98,6 +99,10 @@ namespace Monitoring.Api.Extensions
             services.AddScoped<IWorkRequestService, WorkRequestAppService>();
             services.AddScoped<INotificationService, NotificationService>();
             services.AddScoped<IPerformanceService, PerformanceService>();
+
+            services.AddScoped<IWorkItemRepository, WorkItemRepository>();
+            services.AddScoped<IWorkItemFilter, WorkItemFilter>();
+            services.AddScoped<IWorkItemHighlighter, WorkItemHighlighter>();
 
             return services;
         }
