@@ -20,6 +20,7 @@ var app = builder.Build();
 QuestPDF.Settings.License = LicenseType.Community;
 
 // Настраиваем Middleware Pipeline
+app.UseDefaultFiles();    // <-- Добавьте этот вызов
 app.UseStaticFiles();
 app.UseSwaggerDocumentation();  // Подключаем Swagger
 app.UseRouting();
