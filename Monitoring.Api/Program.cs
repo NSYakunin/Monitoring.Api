@@ -5,6 +5,7 @@ using QuestPDF.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
 
 // Добавляем все сервисы через методы расширения
+builder.Services.AddSignalR();
 builder.Services.AddJwtAuthentication(builder.Configuration);    // 1) JWT + 2) Аутентификация
 builder.Services.AddDatabase(builder.Configuration);             // 3) База данных
 builder.Services.AddMemoryCacheService();                        // 4) MemoryCache
@@ -20,6 +21,7 @@ var app = builder.Build();
 QuestPDF.Settings.License = LicenseType.Community;
 
 // Настраиваем Middleware Pipeline
+app.MapHub<Monitoring.Api.Chat.ChatHub>("/chatHub");
 app.UseDefaultFiles();    // <-- Добавьте этот вызов
 app.UseStaticFiles();
 app.UseSwaggerDocumentation();  // Подключаем Swagger

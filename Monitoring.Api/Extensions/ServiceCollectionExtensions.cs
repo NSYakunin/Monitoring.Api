@@ -159,9 +159,12 @@ namespace Monitoring.Api.Extensions
             {
                 opt.AddPolicy("MyPolicy", policy =>
                 {
-                    policy.AllowAnyOrigin()
-                          .AllowAnyMethod()
-                          .AllowAnyHeader();
+                    // Для разработки иногда проще разрешить всё:
+                    policy
+                        .AllowAnyHeader()
+                        .AllowAnyMethod()
+                        .SetIsOriginAllowed(_ => true) // или .WithOrigins("http://localhost:3000") если хотим конкретный origin
+                        .AllowCredentials();          // обязательно для SignalR
                 });
             });
 
