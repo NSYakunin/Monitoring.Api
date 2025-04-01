@@ -2,18 +2,31 @@
 
 namespace Monitoring.Api.Chat
 {
-    /// <summary чата.
-    /// Любой клиент может вызвать SendMessage(user, message), и все получат событие ReceiveMessage.
+    /// <summary>
+    /// Класс хаба для чата.
     /// </summary>
     public class ChatHub : Hub
     {
         /// <summary>
-        /// Клиент (JS или другой) вызывает connection.invoke("SendMessage", user, message).
-        /// Мы рассылаем сообщение всем, кто подключён.
+        /// Отправка текстового сообщения.
         /// </summary>
         public async Task SendMessage(string user, string message)
         {
+            // Рассылаем всем событие ReceiveMessage
             await Clients.All.SendAsync("ReceiveMessage", user, message);
+        }
+
+        /// <summary>
+        /// Отправка файла (в Base64) всем клиентам.
+        /// </summary>
+        /// <param name="user">Имя пользователя</param>
+        /// <param name="fileName">Имя файла (например, image.png)</param>
+        /// <param name="fileType">Тип (MIME), например image/png</param>
+        /// <param name="base64Data">Содержимое файла в Base64</param>
+        public async Task SendFile(string user, string fileName, string fileType, string base64Data)
+        {
+            // Рассылаем событие ReceiveFile
+            await Clients.All.SendAsync("ReceiveFile", user, fileName, fileType, base64Data);
         }
     }
 }

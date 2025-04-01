@@ -15,12 +15,15 @@ namespace Monitoring.Api.Chat
         }
 
         /// <summary>
+        /// Пример POST-метода для отправки текстового сообщения через контроллер.
+        /// </summary>
+        /// <remarks>
         /// POST /api/Chat/SendMessage
         /// {
         ///   "user": "Петя",
         ///   "message": "Всем привет из Swagger!"
         /// }
-        /// </summary>
+        /// </remarks>
         [HttpPost("SendMessage")]
         public async Task<IActionResult> SendMessage([FromBody] ChatMessageDto msg)
         {
@@ -30,6 +33,9 @@ namespace Monitoring.Api.Chat
         }
     }
 
+    /// <summary>
+    /// DTO для текстового сообщения
+    /// </summary>
     public class ChatMessageDto
     {
         public string User { get; set; }
