@@ -64,6 +64,14 @@ public partial class MyDbContext : DbContext
 
     public virtual DbSet<WorksTep> WorksTeps { get; set; }
 
+    public virtual DbSet<ChatGroup> ChatGroups { get; set; }
+
+    public virtual DbSet<ChatGroupUser> ChatGroupUsers { get; set; }
+
+    public virtual DbSet<ChatMessage> ChatMessages { get; set; }
+
+    public virtual DbSet<ChatUserRelationship> ChatUserRelationships { get; set; }
+
     /// <summary>
     /// Убираем вызов UseSqlServer(...), так как у нас DI.
     /// Если нужно, можем проверить IsConfigured и т.д.
@@ -340,6 +348,40 @@ public partial class MyDbContext : DbContext
             entity.Property(e => e.KolFact).HasColumnName("kolFact");
             entity.Property(e => e.KolPlan).HasColumnName("kolPlan");
             entity.Property(e => e.Month).HasColumnName("month");
+        });
+
+        modelBuilder.Entity<ChatGroup>(entity =>
+        {
+            entity.ToTable("ChatGroup");
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(getutcdate())")
+                .HasColumnType("datetime");
+            entity.Property(e => e.GroupName).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<ChatGroupUser>(entity =>
+        {
+            entity.ToTable("ChatGroupUser");
+
+            entity.HasOne(d => d.Group).WithMany(p => p.ChatGroupUsers)
+                .HasForeignKey(d => d.GroupId)
+                .HasConstraintName("FK_ChatGroupUser_ChatGroup");
+        });
+
+        modelBuilder.Entity<ChatMessage>(entity =>
+        {
+            entity.ToTable("ChatMessage");
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(getutcdate())")
+                .HasColumnType("datetime");
+            entity.Property(e => e.MessageText).HasMaxLength(2000);
+        });
+
+        modelBuilder.Entity<ChatUserRelationship>(entity =>
+        {
+            entity.ToTable("ChatUserRelationship");
         });
 
         OnModelCreatingPartial(modelBuilder);

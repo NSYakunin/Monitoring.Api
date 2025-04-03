@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 
 namespace Monitoring.Application.DTO
 {
-    // DTO для "подразделений"
     public class DivisionDto
     {
         public int IdDivision { get; set; }

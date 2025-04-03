@@ -104,6 +104,8 @@ namespace Monitoring.Api.Extensions
             services.AddScoped<IWorkItemFilter, WorkItemFilter>();
             services.AddScoped<IWorkItemHighlighter, WorkItemHighlighter>();
 
+            services.AddScoped<IChatService, ChatService>();
+
             return services;
         }
 

@@ -21,7 +21,7 @@ var app = builder.Build();
 QuestPDF.Settings.License = LicenseType.Community;
 
 // Настраиваем Middleware Pipeline
-app.MapHub<Monitoring.Api.Chat.ChatHub>("/chatHub");
+app.MapHub<Monitoring.Api.Hubs.ChatHub>("/chatHub");
 app.UseDefaultFiles();    // <-- Добавьте этот вызов
 app.UseStaticFiles();
 app.UseSwaggerDocumentation();  // Подключаем Swagger

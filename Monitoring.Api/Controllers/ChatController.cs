@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Monitoring.Api.Hubs;
 
 namespace Monitoring.Api.Chat
 {
