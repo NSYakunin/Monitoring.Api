@@ -30,4 +30,9 @@
     <ProjectReference Include="..\Monitoring.Domain\Monitoring.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Migrations\" />
+    <Folder Include="Новая папка\" />
+  </ItemGroup>
+
 </Project>

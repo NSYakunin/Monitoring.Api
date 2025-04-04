@@ -1,6 +1,7 @@
 ﻿// ------------------------------------------------
 // ФАЙЛ: Monitoring.Application\Interfaces\IChatService.cs
 // ------------------------------------------------
+using Monitoring.Application.DTO;
 using Monitoring.Domain.Chat;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -9,6 +10,7 @@ namespace Monitoring.Application.Interfaces
 {
     public interface IChatService
     {
+        Task<List<UserDto>> GetFriendsAsync(int userId);
         // Отправить сообщение (личное или в группу)
         Task<ChatMessageDto> SendMessageAsync(int fromUserId, int? toUserId, int? groupId, string message);
 

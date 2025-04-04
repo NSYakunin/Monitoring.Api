@@ -58,6 +58,20 @@ namespace Monitoring.Api.Extensions
                         ValidateLifetime = false,
                         ClockSkew = TimeSpan.Zero
                     };
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnMessageReceived = context =>
+                        {
+                            // Достаём токен из query["access_token"], если запрос к /chatHub
+                            var accessToken = context.Request.Query["access_token"];
+                            var path = context.HttpContext.Request.Path;
+                            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/chatHub"))
+                            {
+                                context.Token = accessToken;
+                            }
+                            return Task.CompletedTask;
+                        }
+                    };
                 });
 
             return services;
@@ -105,6 +119,7 @@ namespace Monitoring.Api.Extensions
             services.AddScoped<IWorkItemHighlighter, WorkItemHighlighter>();
 
             services.AddScoped<IChatService, ChatService>();
+            services.AddScoped<IUserService, UserService>();
 
             return services;
         }

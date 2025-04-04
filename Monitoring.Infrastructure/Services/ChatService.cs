@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Monitoring.Application.DTO;
 
 namespace Monitoring.Infrastructure.Services
 {
@@ -20,6 +21,34 @@ namespace Monitoring.Infrastructure.Services
         public ChatService(MyDbContext context)
         {
             _context = context;
+        }
+
+        /// <summary>
+        /// Возвращаем список друзей текущего пользователя
+        /// (по ChatUserRelationships, где userId = currentUserId и IsFriend = true).
+        /// </summary>
+        public async Task<List<UserDto>> GetFriendsAsync(int userId)
+        {
+            // Выбираем всех, у кого UserId = userId и IsFriend = true,
+            // потом джойним таблицу Users, чтобы взять SmallName/Name.
+            var friendIds = await _context.ChatUserRelationships
+                .Where(r => r.UserId == userId && r.IsFriend == true)
+                .Select(r => r.OtherUserId)
+                .ToListAsync();
+
+            if (!friendIds.Any())
+                return new List<UserDto>();
+
+            var friendsData = await _context.Users
+                .Where(u => friendIds.Contains(u.IdUser))
+                .Select(u => new UserDto
+                {
+                    UserId = u.IdUser,
+                    UserName = u.SmallName ?? u.Name
+                })
+                .ToListAsync();
+
+            return friendsData;
         }
 
         public async Task<ChatMessageDto> SendMessageAsync(int fromUserId, int? toUserId, int? groupId, string message)
