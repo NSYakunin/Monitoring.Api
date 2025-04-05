@@ -1,7 +1,4 @@
-﻿// ------------------------------------------------
-// ФАЙЛ: Monitoring.Infrastructure\Services\ChatService.cs
-// ------------------------------------------------
-using Monitoring.Application.Interfaces;
+﻿using Monitoring.Application.Interfaces;
 using Monitoring.Domain.Chat;
 using Monitoring.Infrastructure.Data;
 using Monitoring.Infrastructure.Data.ScaffoldModels;
@@ -29,8 +26,6 @@ namespace Monitoring.Infrastructure.Services
         /// </summary>
         public async Task<List<UserDto>> GetFriendsAsync(int userId)
         {
-            // Выбираем всех, у кого UserId = userId и IsFriend = true,
-            // потом джойним таблицу Users, чтобы взять SmallName/Name.
             var friendIds = await _context.ChatUserRelationships
                 .Where(r => r.UserId == userId && r.IsFriend == true)
                 .Select(r => r.OtherUserId)
@@ -57,7 +52,6 @@ namespace Monitoring.Infrastructure.Services
             if (toUserId.HasValue)
             {
                 bool blocked = await IsBlockedAsync(toUserId.Value, fromUserId);
-                // Если userId заблокирован (toUserId заблокировал fromUserId), можно выдать ошибку
                 if (blocked)
                     throw new Exception("Вы не можете отправить сообщение — пользователь вас заблокировал.");
             }
@@ -126,7 +120,6 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task DeleteMessageAsync(long messageId, int requestingUserId)
         {
-            // Например: удалять можно, если сообщение твоё, либо ты админ группы (если оно групповое).
             var msg = await _context.ChatMessages.FindAsync(messageId);
             if (msg == null) return;
 
@@ -137,7 +130,6 @@ namespace Monitoring.Infrastructure.Services
                 // имеет ли requestingUserId права админа в группе ...
                 if (msg.GroupId.HasValue)
                 {
-                    // Проверим, админ ли requestingUserId
                     var grpUser = await _context.ChatGroupUsers
                         .FirstOrDefaultAsync(gu => gu.GroupId == msg.GroupId.Value && gu.UserId == requestingUserId);
                     if (grpUser == null || !grpUser.IsAdmin)
@@ -155,7 +147,6 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task ClearPrivateHistoryAsync(int userId, int otherUserId)
         {
-            // Удаляем все личные сообщения между userId и otherUserId
             var msgs = await _context.ChatMessages
                 .Where(m => (
                     (m.FromUserId == userId && m.ToUserId == otherUserId)
@@ -172,7 +163,6 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task ClearGroupHistoryAsync(int groupId, int requestingUserId)
         {
-            // Проверяем, что requestingUserId админ группы
             var grpUser = await _context.ChatGroupUsers
                 .FirstOrDefaultAsync(g => g.GroupId == groupId && g.UserId == requestingUserId);
             if (grpUser == null || !grpUser.IsAdmin)
@@ -275,7 +265,6 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task<bool> IsBlockedAsync(int userA, int userB)
         {
-            // Проверяем, заблокирован ли userB со стороны userA
             var rel = await _context.ChatUserRelationships
                 .FirstOrDefaultAsync(r =>
                     r.UserId == userA && r.OtherUserId == userB
@@ -338,7 +327,6 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task RemoveUserFromGroupAsync(int groupId, int userId, int requestingUserId)
         {
-            // Чтобы удалить, нужно быть админом
             var req = await _context.ChatGroupUsers
                 .FirstOrDefaultAsync(x => x.GroupId == groupId && x.UserId == requestingUserId);
             if (req == null || !req.IsAdmin)

@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using System.Linq;
 using System.Security.Claims;
 using System.Collections.Generic;
-using Monitoring.Application.DTO; // <-- dto-шки
+using Monitoring.Application.DTO;
 using System.Threading;
 using Monitoring.Domain.Chat;
 
@@ -42,6 +42,7 @@ namespace Monitoring.Api.Hubs
             // Шлём событие "ReceivePrivateMessage" обоим участникам
             await Clients.User(toUserId.ToString())
                 .SendAsync("ReceivePrivateMessage", msgDto);
+
             await Clients.User(fromUserId.ToString())
                 .SendAsync("ReceivePrivateMessage", msgDto);
         }
@@ -56,13 +57,14 @@ namespace Monitoring.Api.Hubs
         }
 
         // ------------------------
-        // Методы для группового чата (оставим как есть)
+        // Методы для группового чата
         // ------------------------
         public async Task SendGroupMessage(int groupId, string message)
         {
             int fromUserId = GetUserIdFromContext();
             var msgDto = await _chatService.SendMessageAsync(fromUserId, null, groupId, message);
 
+            // Шлём всем участникам группы
             await Clients.Group(groupId.ToString())
                 .SendAsync("ReceiveGroupMessage", msgDto);
         }
@@ -109,7 +111,7 @@ namespace Monitoring.Api.Hubs
         }
 
         // ------------------------
-        //  Новые методы: GetFriends, GetAllUsersExceptMe
+        //  Методы: GetFriends, GetAllUsersExceptMe
         // ------------------------
 
         /// <summary>
@@ -118,7 +120,6 @@ namespace Monitoring.Api.Hubs
         public async Task<List<UserDto>> GetFriends()
         {
             int userId = GetUserIdFromContext();
-            // Этот метод предполагается, что возвращает DTO с userId, userName.
             return await _chatService.GetFriendsAsync(userId);
         }
 
