@@ -22,26 +22,22 @@ namespace Monitoring.Infrastructure.Services
 
         /// <summary>
         /// Возвращаем список друзей текущего пользователя
-        /// (по ChatUserRelationships, где userId = currentUserId и IsFriend = true).
+        /// без использования Contains(...),
+        /// чтобы не вызывать ошибку "WITH ..." на старых SQL Server.
         /// </summary>
         public async Task<List<UserDto>> GetFriendsAsync(int userId)
         {
-            var friendIds = await _context.ChatUserRelationships
-                .Where(r => r.UserId == userId && r.IsFriend == true)
-                .Select(r => r.OtherUserId)
-                .ToListAsync();
-
-            if (!friendIds.Any())
-                return new List<UserDto>();
-
-            var friendsData = await _context.Users
-                .Where(u => friendIds.Contains(u.IdUser))
-                .Select(u => new UserDto
+            // Вместо friendIds.Contains(u.IdUser) — делаем обычный JOIN
+            var friendsData = await (
+                from r in _context.ChatUserRelationships
+                join u in _context.Users on r.OtherUserId equals u.IdUser
+                where r.UserId == userId && r.IsFriend == true
+                select new UserDto
                 {
                     UserId = u.IdUser,
                     UserName = u.SmallName ?? u.Name
-                })
-                .ToListAsync();
+                }
+            ).ToListAsync();
 
             return friendsData;
         }
@@ -126,8 +122,7 @@ namespace Monitoring.Infrastructure.Services
             // Проверка владельца
             if (msg.FromUserId != requestingUserId)
             {
-                // Если это групповое сообщение, можно проверить, 
-                // имеет ли requestingUserId права админа в группе ...
+                // Если это групповое сообщение, можно проверить админство
                 if (msg.GroupId.HasValue)
                 {
                     var grpUser = await _context.ChatGroupUsers
@@ -204,7 +199,7 @@ namespace Monitoring.Infrastructure.Services
             else
             {
                 rel.IsFriend = true;
-                rel.IsBlocked = false; // на всякий случай
+                rel.IsBlocked = false;
             }
             await _context.SaveChangesAsync();
         }
@@ -300,17 +295,15 @@ namespace Monitoring.Infrastructure.Services
 
         public async Task AddUserToGroupAsync(int groupId, int userId, bool isAdmin = false)
         {
-            // проверка: существует ли группа
             var group = await _context.ChatGroups.FindAsync(groupId);
             if (group == null)
                 throw new Exception("Группа не найдена.");
 
-            // проверка: нет ли уже записи
             var existing = await _context.ChatGroupUsers
                 .FirstOrDefaultAsync(x => x.GroupId == groupId && x.UserId == userId);
             if (existing != null)
             {
-                existing.IsAdmin = isAdmin; // обновим статус
+                existing.IsAdmin = isAdmin;
             }
             else
             {

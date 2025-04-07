@@ -7,7 +7,6 @@ using System.Linq;
 using System.Security.Claims;
 using System.Collections.Generic;
 using Monitoring.Application.DTO;
-using System.Threading;
 using Monitoring.Domain.Chat;
 
 namespace Monitoring.Api.Hubs
@@ -17,9 +16,6 @@ namespace Monitoring.Api.Hubs
     {
         private readonly IChatService _chatService;
         private readonly IUserService _userService;
-        // Предположим, что мы завели IUserService, чтобы получать список пользователей.
-        // Если у вас нет IUserService, можно в конструкторе получать DbContext напрямую, 
-        // или как-то иначе доставать список юзеров.
 
         public ChatHub(IChatService chatService, IUserService userService)
         {
@@ -30,26 +26,18 @@ namespace Monitoring.Api.Hubs
         // ------------------------
         // Методы для приватного чата
         // ------------------------
-
-        /// <summary>
-        /// Отправка личного сообщения (From = текущийUser, To = toUserId).
-        /// </summary>
         public async Task SendPrivateMessage(int toUserId, string message)
         {
             int fromUserId = GetUserIdFromContext();
             var msgDto = await _chatService.SendMessageAsync(fromUserId, toUserId, null, message);
 
-            // Шлём событие "ReceivePrivateMessage" обоим участникам
+            // Шлём событие и отправителю (Caller), и получателю (User(toUserId))
             await Clients.User(toUserId.ToString())
                 .SendAsync("ReceivePrivateMessage", msgDto);
-
             await Clients.User(fromUserId.ToString())
                 .SendAsync("ReceivePrivateMessage", msgDto);
         }
 
-        /// <summary>
-        /// Получить историю приватных сообщений между текущим пользователем и указанным friendUserId.
-        /// </summary>
         public async Task<List<ChatMessageDto>> GetPrivateMessages(int friendUserId)
         {
             int currentUserId = GetUserIdFromContext();
@@ -64,7 +52,6 @@ namespace Monitoring.Api.Hubs
             int fromUserId = GetUserIdFromContext();
             var msgDto = await _chatService.SendMessageAsync(fromUserId, null, groupId, message);
 
-            // Шлём всем участникам группы
             await Clients.Group(groupId.ToString())
                 .SendAsync("ReceiveGroupMessage", msgDto);
         }
@@ -111,23 +98,14 @@ namespace Monitoring.Api.Hubs
         }
 
         // ------------------------
-        //  Методы: GetFriends, GetAllUsersExceptMe
+        // GetFriends, GetAllUsersExceptMe
         // ------------------------
-
-        /// <summary>
-        /// Возвращает список друзей текущего пользователя.
-        /// </summary>
         public async Task<List<UserDto>> GetFriends()
         {
             int userId = GetUserIdFromContext();
             return await _chatService.GetFriendsAsync(userId);
         }
 
-        /// <summary>
-        /// Возвращает список всех пользователей (кроме текущего).
-        /// Можно применить фильтр, чтобы исключать тех, кто уже "друг".
-        /// Но оставим для примера - пусть просто все, кроме нас.
-        /// </summary>
         public async Task<List<UserDto>> GetAllUsersExceptMe()
         {
             int userId = GetUserIdFromContext();
