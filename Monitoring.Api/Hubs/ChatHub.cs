@@ -7,7 +7,6 @@ using System.Linq;
 using System.Security.Claims;
 using System.Collections.Generic;
 using Monitoring.Application.DTO;
-using Monitoring.Domain.Chat;
 
 namespace Monitoring.Api.Hubs
 {
@@ -100,7 +99,7 @@ namespace Monitoring.Api.Hubs
         // ------------------------
         // GetFriends, GetAllUsersExceptMe
         // ------------------------
-        public async Task<List<UserDto>> GetFriends()
+        public async Task<List<UserChatDto>> GetFriends()
         {
             int userId = GetUserIdFromContext();
             return await _chatService.GetFriendsAsync(userId);
