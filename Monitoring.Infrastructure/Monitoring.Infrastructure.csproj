@@ -8,8 +8,11 @@
 
   <ItemGroup>
     <Compile Remove="Data\Repositories\**" />
+    <Compile Remove="Новая папка\**" />
     <EmbeddedResource Remove="Data\Repositories\**" />
+    <EmbeddedResource Remove="Новая папка\**" />
     <None Remove="Data\Repositories\**" />
+    <None Remove="Новая папка\**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,7 +35,6 @@
 
   <ItemGroup>
     <Folder Include="Migrations\" />
-    <Folder Include="Новая папка\" />
   </ItemGroup>
 
 </Project>

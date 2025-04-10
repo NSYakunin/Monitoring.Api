@@ -1,32 +1,22 @@
-﻿// ------------------------------------------------
-// ФАЙЛ: Monitoring.Application\Interfaces\IChatService.cs
-// ------------------------------------------------
-using Monitoring.Application.DTO;
+﻿using Monitoring.Application.DTO;
 using Monitoring.Domain.Chat;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Monitoring.Application.Interfaces
 {
+    /// <summary>
+    /// Интерфейс чатового сервиса.
+    /// Содержит бизнес-логику (проверки, условия, создание DTO).
+    /// </summary>
     public interface IChatService
     {
         Task<List<UserDto>> GetFriendsAsync(int userId);
-        // Отправить сообщение (личное или в группу)
         Task<ChatMessageDto> SendMessageAsync(int fromUserId, int? toUserId, int? groupId, string message);
-
-        // Получить историю сообщений с конкретным пользователем
         Task<List<ChatMessageDto>> GetPrivateMessagesAsync(int userId, int otherUserId);
-
-        // Получить историю сообщений в группе
         Task<List<ChatMessageDto>> GetGroupMessagesAsync(int groupId);
-
-        // Удалить сообщение (мягкое удаление)
         Task DeleteMessageAsync(long messageId, int requestingUserId);
-
-        // Очистить историю сообщений (полностью) в личном чате
         Task ClearPrivateHistoryAsync(int userId, int otherUserId);
-
-        // Очистить историю в группе (только если пользователь - админ?)
         Task ClearGroupHistoryAsync(int groupId, int requestingUserId);
 
         // --------------------
@@ -36,7 +26,6 @@ namespace Monitoring.Application.Interfaces
         Task RemoveFriendAsync(int userId, int friendUserId);
         Task BlockUserAsync(int userId, int blockedUserId);
         Task UnblockUserAsync(int userId, int blockedUserId);
-
         // Проверить, заблокирован ли userB со стороны userA
         Task<bool> IsBlockedAsync(int userA, int userB);
 

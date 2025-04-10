@@ -120,6 +120,7 @@ namespace Monitoring.Api.Extensions
 
             services.AddScoped<IChatService, ChatService>();
             services.AddScoped<IUserService, UserService>();
+            services.AddScoped<IChatRepository, ChatRepository>();
 
             return services;
         }
